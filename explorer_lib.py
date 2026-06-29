@@ -162,22 +162,40 @@ def optimize_portfolio(returns: pd.DataFrame,
 
     clusters, reps, Z = cluster_and_pick(filtered, n_clusters)
 
-    # Force pinned assets into the representative set
+    # Build ticker → cluster_id map so we can replace each cluster's auto-rep
+    # with any pinned asset that belongs to the same cluster.
+    ticker_to_cluster = {}
+    for cid, tickers in clusters.items():
+        for t in tickers:
+            ticker_to_cluster[t] = cid
+
+    # Map cluster_id → chosen representative (start with auto-picked reps)
+    cluster_rep = {}
+    for r in reps:
+        cluster_rep[ticker_to_cluster[r]] = r
+
+    # For each pinned asset present in the filtered universe, override the
+    # representative of its cluster. If two pinned assets fall in the same
+    # cluster, the latter wins (a small ambiguity; rare in practice).
     pinned_in = [p for p in pinned if p in filtered.columns]
-    final_assets = list(dict.fromkeys(pinned_in + reps))[:n_clusters]
-    if len(final_assets) < n_clusters:
-        for r in reps:
-            if r not in final_assets:
-                final_assets.append(r)
-                if len(final_assets) == n_clusters:
-                    break
+    for p in pinned_in:
+        cid = ticker_to_cluster[p]
+        cluster_rep[cid] = p
+
+    final_assets = list(cluster_rep.values())
 
     sub = filtered[final_assets]
     mu = expected_returns.mean_historical_return(sub, returns_data=True, frequency=12)
     S  = risk_models.CovarianceShrinkage(sub, returns_data=True, frequency=12).ledoit_wolf()
     n  = len(final_assets)
     upper = max(max_weight, 1.5 / n)
-    bounds = (min_weight, upper)
+    # Per-asset bounds: pinned assets get a floor of max(min_weight, 1%) so the
+    # optimizer can't zero them out. Non-pinned assets can go to min_weight.
+    pinned_floor = max(min_weight, 0.01)
+    bounds = [
+        (pinned_floor if a in pinned_in else min_weight, upper)
+        for a in final_assets
+    ]
     ef = EfficientFrontier(mu, S, weight_bounds=bounds)
     ef.max_sharpe(risk_free_rate=risk_free)
     weights = ef.clean_weights()

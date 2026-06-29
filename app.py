@@ -516,7 +516,9 @@ with tool_tab:
     st.caption("Configura las palancas, presiona Optimizar. Pasa el cursor sobre cualquier métrica para ver una definición.")
 
     RETURNS = cached_returns()
-    all_regions = sorted({ticker_region(t) for t in drop_benchmarks(RETURNS).columns})
+    investable = drop_benchmarks(RETURNS)
+    all_regions = sorted({ticker_region(t) for t in investable.columns})
+    all_tickers = sorted(investable.columns.tolist())
 
     with st.sidebar:
         st.header("Controles")
@@ -531,12 +533,16 @@ with tool_tab:
                              help="Techo del peso por activo. Evita la concentración en una sola acción.")
         min_sharpe = st.slider("Sharpe individual mínimo", -1.0, 2.5, 0.0, 0.1,
                                help="Excluye activos cuyo Sharpe individual histórico esté por debajo de este umbral. Más alto = universo más exigente.")
-        pinned = st.text_input("Activos fijos (incluir siempre)", "",
-                               placeholder="AAPL, BRK-B, ASML.AS",
-                               help="Fuerza la inclusión de estos activos, sin importar el clustering. Separa con comas.")
-        excluded = st.text_input("Activos excluidos", "",
-                                 placeholder="TSLA, GME",
-                                 help="Excluye estos activos del universo. Separa con comas.")
+        pinned = st.multiselect(
+            "Activos fijos (incluir siempre)",
+            options=all_tickers,
+            default=[],
+            help="Escribe para buscar entre los ~2,000 activos del universo. Cada activo elegido reemplaza al representante automático de su cluster — la diversificación entre clusters se mantiene.")
+        excluded = st.multiselect(
+            "Activos excluidos",
+            options=all_tickers,
+            default=[],
+            help="Escribe para buscar y excluir activos del universo. Útil para descartar empresas específicas antes del clustering.")
         regions_sel = st.multiselect("Regiones", all_regions, default=all_regions,
                                      help="Restringe el universo a las regiones elegidas. Vacío = ninguna.")
         run_backtest = st.checkbox("Ejecutar backtest fuera de muestra", True,
@@ -547,8 +553,6 @@ with tool_tab:
         st.session_state.result = None
         st.session_state.bt = None
 
-    def parse_t(s): return [x.strip().upper() for x in s.split(",") if x.strip()]
-
     if go:
         with st.spinner("Optimizando portafolio... (puede tomar 20-40 segundos con backtest)"):
             try:
@@ -557,7 +561,7 @@ with tool_tab:
                     RETURNS,
                     n_clusters=n_clusters,
                     min_weight=min_w, max_weight=max_w,
-                    pinned=parse_t(pinned), excluded=parse_t(excluded),
+                    pinned=pinned, excluded=excluded,
                     min_sharpe=min_sharpe if min_sharpe > -0.99 else None,
                     regions=regions,
                 )
@@ -567,7 +571,7 @@ with tool_tab:
                         RETURNS,
                         n_clusters=n_clusters,
                         min_weight=min_w, max_weight=max_w,
-                        pinned=parse_t(pinned), excluded=parse_t(excluded),
+                        pinned=pinned, excluded=excluded,
                         min_sharpe=min_sharpe if min_sharpe > -0.99 else None,
                         regions=regions,
                     )
@@ -580,10 +584,11 @@ with tool_tab:
     if result is None:
         st.info("Configura las palancas en la barra lateral y presiona **Optimizar** para construir un portafolio.")
     else:
-        weights = result["weights"]
-        weights = weights[weights > 0.001].sort_values(ascending=False)
+        weights_all = result["weights"].sort_values(ascending=False)
+        weights = weights_all[weights_all > 0.001]
         perf = result["performance"]
-        metrics = asset_metrics(result["selected_returns"], weights)
+        metrics_all = asset_metrics(result["selected_returns"], weights_all)
+        metrics = metrics_all.loc[weights.index]
 
         # KPIs
         spy = get_benchmark(RETURNS, "SPY")
@@ -654,10 +659,12 @@ with tool_tab:
             ax.set_title("Por región")
             st.pyplot(fig, use_container_width=True)
 
-        # Tabla por activo
+        # Tabla por activo (incluye los descartados con peso 0)
         st.markdown("### Detalle por activo")
-        st.caption("Una fila por tenencia. Haz click en los encabezados para ordenar.")
-        view = metrics.copy()
+        st.caption("Una fila por activo seleccionado por el clustering. "
+                   "Incluye los que el optimizador descartó (peso 0) para que veas qué candidatos había. "
+                   "Haz click en los encabezados para ordenar.")
+        view = metrics_all.copy()
         view["weight"] = (view["weight"] * 100).round(2)
         view["annual_return"] = (view["annual_return"] * 100).round(2)
         view["volatility"] = (view["volatility"] * 100).round(2)
