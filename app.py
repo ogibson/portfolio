@@ -89,7 +89,7 @@ home_tab, tool_tab = st.tabs(["📖 La Historia", "🛠 La Herramienta"])
 # PESTAÑA HISTORIA
 # =================================================================
 with home_tab:
-    st.title("¿Puede el Clustering Jerárquico Ganarle al Mercado?")
+    st.title("¿Puede el Clustering Ganarle al Mercado?")
     st.markdown("*Un proyecto de investigación que extiende la teoría de Markowitz "
                 "para escoger **qué activos comprar y en qué proporción**, "
                 "desde un universo de miles de acciones globales.*")
@@ -117,12 +117,12 @@ with home_tab:
     > *"Dados estos 5 ETFs, ¿qué combinación maximiza el Sharpe?"*
 
     Este proyecto invierte la pregunta. Desde un universo de **~2,000 activos globales**,
-    queremos elegir **simultáneamente qué N activos incluir y cómo ponderarlos** — una optimización conjunta.
+    queremos elegir **simultáneamente qué N activos incluir y cómo ponderarlos**.
 
     ¿Por qué es difícil?
 
     - Elegir N activos de M es un problema **combinatorio** (NP-difícil): existen C(2000, 50) ≈ 10⁸⁵ portafolios posibles de 50 activos.
-    - No se puede ejecutar Markowitz directamente sobre 2,000 activos — la matriz de covarianza no se puede estimar de forma confiable con tan pocos datos (lo explicamos en detalle en la sección 4).
+    - No se puede ejecutar Markowitz directamente sobre 2,000 activos, porque la matriz de covarianza no se puede estimar de forma confiable con tan pocos datos (lo explicamos en detalle en la sección 4).
 
     **Nuestro enfoque:** usar **clustering jerárquico** para reducir el universo a N representantes
     con comportamiento distinto entre sí, y luego correr Markowitz sobre esos N.
@@ -164,7 +164,7 @@ with home_tab:
     | Mensual  | 60     | Señal más limpia pero la estimación se vuelve frágil |
 
     Contraintuitivamente, **la frecuencia mensual funcionó al menos tan bien como la semanal**
-    en nuestros experimentos fuera de muestra — la señal más limpia compensa el menor tamaño
+    en nuestros experimentos fuera de muestra. La señal más limpia compensa el menor tamaño
     de muestra, sobre todo tras aplicar la reducción de Ledoit-Wolf (siguiente sección).
     Usamos mensual en todo el proyecto.
     """)
@@ -177,7 +177,7 @@ with home_tab:
     (Apple-Microsoft, Apple-Toyota, etc.) intenta capturar qué tan juntos se mueven.
     Con 2,000 activos hay alrededor de **2 millones de relaciones** distintas que estimar.
     Pero solo tenemos **60 meses de historia** para estimarlas. El problema no es que no se pueda
-    calcular la matriz — la fórmula funciona y devuelve números. **El problema es que esos números
+    calcular la matriz, la fórmula funciona y devuelve números. **El problema es que esos números
     están llenos de ruido.**
 
     ### ¿De dónde viene el ruido?
@@ -188,7 +188,7 @@ with home_tab:
 
     Lo único que podemos hacer es **estimarlo** con los datos disponibles. En nuestro caso, 60 meses.
 
-    Imagina que tomaras dos ventanas de 60 meses distintas:
+    Imaginemos que tomamos dos ventanas de 60 meses distintas:
 
     - **Ventana A** (2018-2023) → calculas la correlación AAPL-MSFT y te da 0.72
     - **Ventana B** (2019-2024) → calculas la misma correlación y te da 0.81
@@ -216,9 +216,9 @@ with home_tab:
     Con 60 meses, nuestro estimado va a oscilar entre **-0.13 y +0.13** solo por puro azar.
 
     Ahora, el optimizador de Markowitz mira una correlación de -0.13 y piensa:
-    *"¡Estos dos activos van en direcciones opuestas! Es diversificación gratis, voy a cargar peso aquí."*
+    *"¡Estos dos activos van en direcciones opuestas! Es diversificación gratis, voy a cargar peso acá."*
 
-    Pero esa correlación de -0.13 **no significa nada** — la relación real es cero. Es ruido puro.
+    Pero esa correlación de -0.13 **no significa nada**, ya que la relación real es cero. 
     El optimizador acaba de apostar el portafolio a una "oportunidad" que solo existe en los datos
     pasados, no en la realidad.
 
@@ -256,8 +256,8 @@ with home_tab:
     st.markdown("## 5. La Idea del Clustering")
     st.markdown("""
     **Reducir 2,000 activos a N grupos con comportamiento similar.**
-    Los activos que se mueven juntos (alta correlación) son sustitutos entre sí —
-    tener *cualquiera* de ellos te da prácticamente la misma exposición que tener cualquier otro del grupo.
+    Los activos que se mueven juntos (alta correlación) son sustitutos entre sí.
+    Tener *cualquiera* de ellos te da prácticamente la misma exposición que tener cualquier otro del grupo.
 
     Aplicamos **clustering jerárquico (Ward)** sobre una matriz de distancias derivada de las correlaciones:
 
@@ -281,12 +281,12 @@ with home_tab:
     "estos activos tecnológicos se parecen entre sí, este grupo de utilities se parece entre sí,
     los dos grupos son distintos". Aunque cada correlación individual tenga error de ±0.13,
     la <em>estructura general</em> de qué se agrupa con qué emerge correctamente. Es como leer
-    un mapa borroso: no distingues cada casa, pero sí ves dónde están los barrios.
+    un mapa borroso: no se distingue cada casa, pero sí se ve dónde están los barrios.
     <br><br>
     En cambio, Markowitz <strong>no tolera el ruido</strong>: busca activamente los valores extremos
     (correlaciones cercanas a cero le parecen "diversificación gratis") y apuesta el portafolio
     a esas oportunidades que muchas veces son ficticias. Por eso podemos usar la matriz ruidosa
-    para clustering pero <em>no</em> para optimización directa.
+    para clustering pero <em>no</em> para optimización directa por Markowitz.
     </div>
     """, unsafe_allow_html=True)
     cols = st.columns(3)
@@ -338,14 +338,14 @@ with home_tab:
 
     Elegimos **mayor Sharpe individual**: el activo cuyo Sharpe histórico es el más alto dentro
     de su cluster. Es intuitivo pero introduce un *sesgo de supervivencia* — los ganadores
-    del pasado no necesariamente seguirán siéndolo. Parte de la brecha entre dentro y fuera de muestra
-    proviene de esta elección.
+    del pasado no necesariamente seguirán siéndolo. Esta es la debilidad fundamental de este modelo, por lo que incorporamos
+    la selección manual de acciones para complementar utilizando una estrategia dual. 
     """)
 
     # ── 7. Optimización ──
     st.markdown("## 7. Optimizando los Pesos de los N Representantes")
     st.markdown("""
-    Ya tenemos los 50 representantes. Lo importante: **descartamos por completo la matriz "sucia"
+    Una vez que ya tenemos los 50 representantes, **descartamos por completo la matriz "sucia"
     de 2,000 activos y construimos una nueva matriz de covarianza desde cero, solo con los 50 elegidos.**
 
     El pipeline completo se ve así:
@@ -369,7 +369,6 @@ with home_tab:
     | Pares a estimar | 2,000,000 | **1,275** |
     | Observaciones | 60 meses | 60 meses |
     | Ruido por par | ±0.13 | ±0.13 (igual) |
-    | "Oportunidades falsas" en las que el optimizador puede caer | Miles | Pocas |
 
     Nota algo interesante: **el ruido por par no cambia** (sigue siendo ±0.13, depende solo del
     número de observaciones). Lo que cambia drásticamente es la **cantidad de pares**. Con 1,275 pares
@@ -411,17 +410,16 @@ with home_tab:
 
     st.markdown("""
     <div class='explainer-box'>
-    <strong>Dentro de muestra vs. fuera de muestra — la distinción clave</strong>
+    <strong>Dentro de muestra vs. fuera de muestra.</strong>
     <br><br>
     El <strong>Sharpe dentro de muestra (in-sample)</strong> se calcula sobre los mismos datos
-    que el optimizador usó para elegir los pesos. Es la versión <em>tramposa</em>:
-    el optimizador mira la historia, encuentra la combinación que mejor se ajusta a esa historia,
-    y luego le preguntas qué Sharpe tiene. Por supuesto se ve excelente — fue diseñado precisamente
-    para esa historia exacta. Casi nunca refleja el desempeño real futuro.
+    que el optimizador usó para elegir los pesos. El optimizador mira la historia, encuentra la combinación que mejor se ajusta a esa historia,
+    y luego le preguntas qué Sharpe tiene. Por supuesto se ve excelente, fue diseñado precisamente
+    para esa historia exacta. Casi nunca refleja el desempeño real futuro. 
     <br><br>
     El <strong>Sharpe realizado (fuera de muestra, OOS)</strong> se calcula sobre datos que el
-    optimizador <em>nunca vio</em> cuando eligió los pesos. Es la versión honesta. Es el único
-    número que sirve para juzgar si la estrategia realmente funciona.
+    optimizador <em>nunca vio</em> cuando eligió los pesos. Es aproximadamente igual a utilizar un set de entrenamiento
+    y uno de validación, y es el único número que sirve para juzgar si la estrategia realmente funciona.
     </div>
     """, unsafe_allow_html=True)
 
@@ -429,9 +427,9 @@ with home_tab:
     <div class='explainer-box'>
     <strong>¿Cómo conseguimos datos "que el optimizador nunca vio"?</strong>
     <br><br>
-    Imagina que viajamos al pasado y nos detenemos cada trimestre.
-    En cada parada le decimos al algoritmo: "<em>solo puedes ver los datos hasta este punto.
-    Construye un portafolio.</em>"
+    Para esto, viajamos al pasado y nos detenemos en cada trimestre.
+    En cada parada le decimos al algoritmo: "<em>solo podés ver los datos hasta este punto.
+    Construí un portafolio.</em>"
     <br><br>
     Luego dejamos correr el reloj 3 meses hacia adelante <em>sin tocar nada</em>, y observamos
     cómo le fue al portafolio. Ese es un periodo "fuera de muestra": el optimizador no vio esos
