@@ -629,22 +629,28 @@ with tool_tab:
         st.markdown("### Métricas principales")
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Activos", len(weights), help="Número de activos con peso superior al 0.1%.")
+
+        # Diferencias numéricas vs SPY (con signo) para que Streamlit colore correctamente.
+        def _pp(diff):  # formatea una diferencia de puntos porcentuales
+            return f"{diff*100:+.2f}pp vs SPY"
+
         c2.metric("Retorno anual (OOS)",
                   f"{bt_stats['annual_return']:.2%}" if bt_stats else "Ejecuta backtest →",
-                  delta=f"SPY: {spy_stats['annual_return']:.2%}" if spy_stats else None,
-                  help="Retorno anualizado calculado sobre el backtest fuera de muestra (walk-forward). El SPY se muestra como referencia.")
+                  delta=_pp(bt_stats['annual_return'] - spy_stats['annual_return']) if spy_stats else None,
+                  help=f"Retorno anualizado en el walk-forward OOS. SPY: {spy_stats['annual_return']:.2%}." if spy_stats else "Retorno anualizado.")
         c3.metric("Volatilidad (OOS)",
                   f"{bt_stats['annual_vol']:.2%}" if bt_stats else "—",
-                  delta=f"SPY: {spy_stats['annual_vol']:.2%}" if spy_stats else None, delta_color="inverse",
-                  help="Desviación estándar anualizada de los retornos. Menor = camino más suave.")
+                  delta=_pp(bt_stats['annual_vol'] - spy_stats['annual_vol']) if spy_stats else None,
+                  delta_color="inverse",
+                  help=f"Desviación estándar anualizada. Menor = camino más suave. SPY: {spy_stats['annual_vol']:.2%}." if spy_stats else "Desviación estándar anualizada.")
         c4.metric("Sharpe realizado (OOS)",
                   f"{bt_stats['sharpe']:.2f}" if bt_stats else "—",
-                  delta=f"SPY: {spy_stats['sharpe']:.2f}" if spy_stats else None,
-                  help="Retorno ajustado por riesgo, calculado de forma honesta sobre el backtest walk-forward. Compáralo con el Sharpe dentro de muestra (más abajo) — la diferencia suele ser grande.")
+                  delta=f"{bt_stats['sharpe'] - spy_stats['sharpe']:+.2f} vs SPY" if spy_stats else None,
+                  help=f"Retorno ajustado por riesgo honesto. SPY: {spy_stats['sharpe']:.2f}." if spy_stats else "Sharpe.")
         c5.metric("Máximo drawdown (OOS)",
                   f"{bt_stats['max_drawdown']:.0%}" if bt_stats else "—",
-                  delta=f"SPY: {spy_stats['max_drawdown']:.0%}" if spy_stats else None, delta_color="inverse",
-                  help="Peor pérdida desde un pico anterior durante el periodo fuera de muestra.")
+                  delta=_pp(bt_stats['max_drawdown'] - spy_stats['max_drawdown']) if spy_stats else None,
+                  help=f"Peor pérdida desde un pico anterior. SPY: {spy_stats['max_drawdown']:.0%}." if spy_stats else "Máximo drawdown.")
 
         with st.expander("Más métricas (dentro de muestra)", expanded=False):
             st.markdown("""
