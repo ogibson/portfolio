@@ -99,7 +99,8 @@ def ticker_region(ticker: str) -> str:
 def filter_universe(returns: pd.DataFrame,
                     excluded: list = None,
                     min_sharpe: float = None,
-                    regions: list = None) -> pd.DataFrame:
+                    regions: list = None,
+                    max_volatility: float = None) -> pd.DataFrame:
     """Apply pre-clustering filters to the universe."""
     df = returns.copy()
     # Keep only columns with at least 90% coverage; fill remaining NaN with 0
@@ -115,6 +116,10 @@ def filter_universe(returns: pd.DataFrame,
         ann_vol = df.std() * np.sqrt(12)
         sharpe = (ann_ret - 0.04) / ann_vol
         keep = sharpe[sharpe >= min_sharpe].index
+        df = df[keep]
+    if max_volatility is not None:
+        ann_vol = df.std() * np.sqrt(12)
+        keep = ann_vol[ann_vol <= max_volatility].index
         df = df[keep]
     return df
 
@@ -146,13 +151,15 @@ def optimize_portfolio(returns: pd.DataFrame,
                        excluded: list = None,
                        min_sharpe: float = None,
                        regions: list = None,
+                       max_volatility: float = None,
                        risk_free: float = 0.04):
     """Full pipeline: filter → cluster → select representatives → max Sharpe."""
     pinned = pinned or []
     excluded = list(excluded or []) + [c for c in BENCHMARK_TICKERS if c in returns.columns]
 
     # Filter universe (but always keep pinned)
-    filtered = filter_universe(returns, excluded=excluded, min_sharpe=min_sharpe, regions=regions)
+    filtered = filter_universe(returns, excluded=excluded, min_sharpe=min_sharpe,
+                               regions=regions, max_volatility=max_volatility)
     for p in pinned:
         if p in returns.columns and p not in filtered.columns:
             filtered[p] = returns[p]
@@ -266,7 +273,8 @@ def backtest_strategy(returns: pd.DataFrame, n_clusters: int = 50,
                       train_months: int = 36, rebal_months: int = 3,
                       min_weight: float = 0.0, max_weight: float = 1.0,
                       pinned: list = None, excluded: list = None,
-                      min_sharpe: float = None, regions: list = None):
+                      min_sharpe: float = None, regions: list = None,
+                      max_volatility: float = None):
     """Walk-forward backtest. Returns a Series of monthly portfolio returns."""
     portfolio_returns = []
     start_idx = train_months
@@ -281,7 +289,8 @@ def backtest_strategy(returns: pd.DataFrame, n_clusters: int = 50,
             res = optimize_portfolio(train, n_clusters=n_clusters,
                                      min_weight=min_weight, max_weight=max_weight,
                                      pinned=pinned, excluded=excluded,
-                                     min_sharpe=min_sharpe, regions=regions)
+                                     min_sharpe=min_sharpe, regions=regions,
+                                     max_volatility=max_volatility)
             w = res["weights"]
             w = w[w > 0]
             common = w.index.intersection(test.columns)
@@ -291,3 +300,22 @@ def backtest_strategy(returns: pd.DataFrame, n_clusters: int = 50,
             print(f"  skip period at {returns.index[start_idx].date()}: {e}")
         start_idx += rebal_months
     return pd.concat(portfolio_returns) if portfolio_returns else pd.Series(dtype=float)
+
+
+def buy_and_hold_backtest(returns: pd.DataFrame, train_months: int = 36,
+                          hold_months: int = 24, **kwargs) -> pd.Series:
+    """Train on the first `train_months`, then hold those weights for `hold_months`.
+    No rebalancing. Returns the monthly portfolio returns over the hold period.
+    Any extra kwargs are forwarded to optimize_portfolio.
+    """
+    if train_months + hold_months > len(returns):
+        hold_months = len(returns) - train_months
+    train = returns.iloc[:train_months]
+    test  = returns.iloc[train_months: train_months + hold_months]
+
+    res = optimize_portfolio(train, **kwargs)
+    w = res["weights"]
+    w = w[w > 0]
+    common = w.index.intersection(test.columns)
+    period_returns = (test[common].fillna(0.0) * w[common]).sum(axis=1)
+    return period_returns

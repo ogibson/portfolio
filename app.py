@@ -19,6 +19,7 @@ from explorer_lib import (
     UNIVERSE_SOURCES, REGION_GROUP, ticker_region,
     BENCHMARK_TICKERS, get_benchmark, drop_benchmarks, perf_stats,
     optimize_portfolio, asset_metrics, equity_curve, backtest_strategy,
+    buy_and_hold_backtest,
 )
 
 st.set_page_config(page_title="Estrategia de Clustering para Portafolios",
@@ -144,10 +145,10 @@ with home_tab:
 
     st.markdown("""
     **Filtros de calidad aplicados:**
-    - Descartar tickers con menos del 80% de cobertura en los 5 años (maneja IPOs recientes y delistings)
-    - Descartar tickers con cualquier retorno mensual > 50% en valor absoluto (atrapa errores de yfinance por stock splits mal ajustados)
+    - Descartar activos con menos del 80% de cobertura en los 5 años (maneja IPOs recientes y delistings)
+    - Descartar activos con cualquier retorno mensual > 50% en valor absoluto (atrapa errores de yfinance por stock splits mal ajustados)
 
-    Después del filtrado quedan ~2,000 tickers utilizables.
+    Después del filtrado quedan ~2,000 activos utilizables.
     """)
     if (STORY_DIR / "universe.png").exists():
         st.image(str(STORY_DIR / "universe.png"), use_container_width=True)
@@ -311,10 +312,14 @@ with home_tab:
     - *Qué tanto se mueven juntos* (lo que queremos para el clustering)
     - *Qué tan volátiles son* (irrelevante para agrupar)
 
-    Ejemplo concreto: dos activos de centavos que se mueven idénticamente tienen covarianza pequeña.
-    Dos blue chips que se mueven idénticamente tienen covarianza grande. Si usáramos covarianza,
-    los activos de centavos terminarían en clusters distintos solo porque sus números son pequeños —
-    aunque su *comportamiento* sea exactamente el mismo.
+    Ejemplo concreto: Coca-Cola (KO) y Pepsi (PEP) tienen correlación de ~0.7 y son poco volátiles.
+    Tesla (TSLA) y Rivian (RIVN) también tienen correlación de ~0.7, pero son muchísimo más volátiles.
+    Misma correlación, pero la covarianza TSLA-RIVN es varias veces más grande que la de KO-PEP,
+    solo porque sus números son más grandes.
+
+    Si usáramos covarianza directamente, el clustering agruparía por "qué tan movido es el activo"
+    en lugar de "con quién se mueve". Coca-Cola podría terminar en un cluster distinto a Pepsi
+    simplemente porque sus retornos son chiquitos, aunque su comportamiento sea idéntico.
 
     La correlación divide la covarianza por las volatilidades y elimina ese efecto.
     Queda un número entre -1 y +1 que mide solo el patrón. Perfecto para clustering.
@@ -518,6 +523,18 @@ with tool_tab:
     all_regions = sorted({ticker_region(t) for t in investable.columns})
     all_tickers = sorted(investable.columns.tolist())
 
+    # Percentiles de volatilidad (anualizada) sobre el universo, para los botones de tolerancia
+    asset_vols = (investable.std() * np.sqrt(12)).dropna()
+    VOL_P25 = float(asset_vols.quantile(0.25))
+    VOL_P50 = float(asset_vols.quantile(0.50))
+    VOL_P75 = float(asset_vols.quantile(0.75))
+    VOL_MAX = float(asset_vols.max())
+
+    # El slider trabaja en puntos porcentuales enteros (5, 50, 100) para que el formato sea claro;
+    # convertimos a decimal cuando lo usamos.
+    if "max_vol_pct" not in st.session_state:
+        st.session_state.max_vol_pct = int(round(VOL_P75 * 100))
+
     with st.sidebar:
         st.header("Controles")
         st.caption("Cada palanca ajusta cómo se construye el portafolio.")
@@ -531,6 +548,21 @@ with tool_tab:
                              help="Techo del peso por activo. Evita la concentración en una sola acción.")
         min_sharpe = st.slider("Sharpe individual mínimo", -1.0, 2.5, 0.0, 0.1,
                                help="Excluye activos cuyo Sharpe individual histórico esté por debajo de este umbral. Más alto = universo más exigente.")
+
+        st.markdown("**Tolerancia al riesgo**")
+        st.caption("Excluye los activos cuya volatilidad anual histórica supere este umbral, antes de hacer clustering.")
+        b1, b2, b3 = st.columns(3)
+        if b1.button("Baja", use_container_width=True, help=f"Solo activos con volatilidad ≤ {VOL_P25:.0%} (cuartil inferior)"):
+            st.session_state.max_vol_pct = int(round(VOL_P25 * 100))
+        if b2.button("Media", use_container_width=True, help=f"Solo activos con volatilidad ≤ {VOL_P50:.0%} (mediana)"):
+            st.session_state.max_vol_pct = int(round(VOL_P50 * 100))
+        if b3.button("Alta", use_container_width=True, help=f"Solo activos con volatilidad ≤ {VOL_P75:.0%} (cuartil superior)"):
+            st.session_state.max_vol_pct = int(round(VOL_P75 * 100))
+        max_vol_pct = st.slider("Volatilidad anual máxima permitida",
+                                min_value=5, max_value=int(round(VOL_MAX * 100)), step=1,
+                                format="%d%%", key="max_vol_pct",
+                                help="Filtro aplicado antes del clustering. Los botones de arriba mueven este slider al percentil 25/50/75 del universo.")
+        max_vol = max_vol_pct / 100.0
         pinned = st.multiselect(
             "Activos fijos (incluir siempre)",
             options=all_tickers,
@@ -550,34 +582,35 @@ with tool_tab:
     if "result" not in st.session_state:
         st.session_state.result = None
         st.session_state.bt = None
+        st.session_state.bh = None
 
     if go:
         with st.spinner("Optimizando portafolio... (puede tomar 20-40 segundos con backtest)"):
             try:
                 regions = regions_sel if len(regions_sel) < len(all_regions) else None
-                st.session_state.result = optimize_portfolio(
-                    RETURNS,
+                common_kwargs = dict(
                     n_clusters=n_clusters,
                     min_weight=min_w, max_weight=max_w,
                     pinned=pinned, excluded=excluded,
                     min_sharpe=min_sharpe if min_sharpe > -0.99 else None,
                     regions=regions,
+                    max_volatility=max_vol if max_vol < VOL_MAX else None,
                 )
+                st.session_state.result = optimize_portfolio(RETURNS, **common_kwargs)
                 st.session_state.bt = None
+                st.session_state.bh = None
                 if run_backtest:
-                    st.session_state.bt = backtest_strategy(
-                        RETURNS,
-                        n_clusters=n_clusters,
-                        min_weight=min_w, max_weight=max_w,
-                        pinned=pinned, excluded=excluded,
-                        min_sharpe=min_sharpe if min_sharpe > -0.99 else None,
-                        regions=regions,
+                    st.session_state.bt = backtest_strategy(RETURNS, **common_kwargs)
+                    # Buy-and-hold: entrenar con primeros 3 años, holdear los siguientes 2
+                    st.session_state.bh = buy_and_hold_backtest(
+                        RETURNS, train_months=36, hold_months=24, **common_kwargs
                     )
             except Exception as e:
                 st.error(f"Falló la optimización: {e}")
 
     result = st.session_state.result
     bt = st.session_state.bt
+    bh = st.session_state.get("bh")
 
     if result is None:
         st.info("Configura las palancas en la barra lateral y presiona **Optimizar** para construir un portafolio.")
@@ -687,17 +720,78 @@ with tool_tab:
         ax.set_ylabel("Valor acumulado")
         st.pyplot(fig, use_container_width=True)
 
-        # Sobre-desempeño acumulado vs SPY
+        # Comparación 3yr train + 2yr hold vs walk-forward vs SPY
+        if bh is not None and len(bh) and bt is not None and len(bt) and "SPY" in RETURNS.columns:
+            st.markdown("### Comparación de estrategias (2 años de holdeo)")
+            st.caption(
+                "Tres formas distintas de invertir, todas medidas sobre el mismo período de prueba "
+                "(2 años fuera de muestra): "
+                "**(1) Buy-and-hold de la estrategia** — entrenamos con 3 años, fijamos los pesos y los mantenemos 2 años sin tocar. "
+                "**(2) Walk-forward de la estrategia** — rebalanceamos los pesos cada trimestre con datos nuevos. "
+                "**(3) SPY buy-and-hold** — el benchmark."
+            )
+            spy_hold = RETURNS["SPY"].loc[bh.index].dropna()
+
+            bh_stats = perf_stats(bh)
+            bt_hold_stats = perf_stats(bt.loc[bh.index]) if set(bh.index).issubset(set(bt.index)) else perf_stats(bt)
+            spy_hold_stats = perf_stats(spy_hold)
+
+            comp = pd.DataFrame({
+                "Sharpe realizado": [bh_stats["sharpe"], bt_hold_stats["sharpe"], spy_hold_stats["sharpe"]],
+                "Desvío estándar (anual)": [bh_stats["annual_vol"], bt_hold_stats["annual_vol"], spy_hold_stats["annual_vol"]],
+                "Retorno acumulado": [bh_stats["total_return"], bt_hold_stats["total_return"], spy_hold_stats["total_return"]],
+            }, index=["Estrategia (buy-and-hold 3yr→2yr)", "Estrategia (walk-forward)", "SPY (buy-and-hold)"])
+
+            comp_view = comp.copy()
+            comp_view["Sharpe realizado"] = comp_view["Sharpe realizado"].round(2)
+            comp_view["Desvío estándar (anual)"] = (comp_view["Desvío estándar (anual)"] * 100).round(2).astype(str) + "%"
+            comp_view["Retorno acumulado"] = (comp_view["Retorno acumulado"] * 100).round(2).astype(str) + "%"
+            st.dataframe(comp_view, use_container_width=True)
+
+            # Curva comparativa
+            fig, ax = plt.subplots(figsize=(11, 4.5))
+            ax.plot(equity_curve(bh).index, equity_curve(bh).values,
+                    label="Estrategia buy-and-hold (3yr→2yr)", linewidth=2, color="#2c4a7a")
+            ax.plot(equity_curve(bt).index, equity_curve(bt).values,
+                    label="Estrategia walk-forward", linewidth=2, linestyle="--", color="#3a7a3a")
+            ax.plot(equity_curve(spy_hold).index, equity_curve(spy_hold).values,
+                    label="SPY buy-and-hold", linewidth=2, color="#a55c3f", alpha=0.85)
+            ax.set_ylabel("Valor acumulado de $1")
+            ax.legend(); ax.grid(alpha=0.3)
+            st.pyplot(fig, use_container_width=True)
+
+        # Ventaja porcentual sobre SPY
         if bt is not None and len(bt) and "SPY" in RETURNS.columns:
-            st.markdown("### Sobre-desempeño acumulado vs SPY")
-            st.caption("Diferencia entre la curva de la estrategia y la del SPY. Verde = estrategia adelante, naranja = SPY adelante.")
+            st.markdown("### Ventaja porcentual sobre SPY")
+            st.caption(
+                "Cuánto más (o menos) vale tu portafolio respecto a haber comprado SPY con el mismo dinero. "
+                "Si la línea está en **+15%**, significa que en ese momento tu portafolio vale 15% más "
+                "que si hubieras invertido todo en SPY desde el inicio. Si está en −5%, vale 5% menos."
+            )
             spy_oos = RETURNS["SPY"].loc[bt.index].dropna()
-            diff = (1 + bt).cumprod() - (1 + spy_oos).cumprod()
+            strat_eq = (1 + bt).cumprod()
+            spy_eq   = (1 + spy_oos).cumprod()
+            advantage = (strat_eq / spy_eq - 1) * 100  # en puntos porcentuales
+
             fig, ax = plt.subplots(figsize=(11, 4))
-            ax.fill_between(diff.index, diff.values, 0, where=(diff.values >= 0), color="#3a7a3a", alpha=0.5)
-            ax.fill_between(diff.index, diff.values, 0, where=(diff.values < 0), color="#a55c3f", alpha=0.5)
-            ax.axhline(0, color="grey", linewidth=0.5)
+            ax.fill_between(advantage.index, advantage.values, 0,
+                            where=(advantage.values >= 0), color="#3a7a3a", alpha=0.5, label="Estrategia adelante")
+            ax.fill_between(advantage.index, advantage.values, 0,
+                            where=(advantage.values < 0), color="#a55c3f", alpha=0.5, label="SPY adelante")
+            ax.plot(advantage.index, advantage.values, color="#2c4a7a", linewidth=1.5)
+            ax.axhline(0, color="grey", linewidth=0.7)
+            ax.yaxis.set_major_formatter(plt.matplotlib.ticker.PercentFormatter(decimals=0))
+            ax.set_ylabel("Ventaja sobre SPY")
+            ax.legend(loc="best")
             ax.grid(alpha=0.3)
+
+            # Anotar el valor final
+            last_val = advantage.iloc[-1]
+            ax.annotate(f"{last_val:+.1f}%",
+                        xy=(advantage.index[-1], last_val),
+                        xytext=(10, 0), textcoords="offset points",
+                        fontsize=11, fontweight="bold",
+                        color="#3a7a3a" if last_val >= 0 else "#a55c3f")
             st.pyplot(fig, use_container_width=True)
 
         # Retornos por periodo
