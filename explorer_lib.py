@@ -96,11 +96,20 @@ def ticker_region(ticker: str) -> str:
     return "United States"
 
 
+def asset_max_drawdown(returns: pd.Series) -> float:
+    """Calcula el drawdown máximo (negativo) de una serie de retornos."""
+    eq = (1 + returns.fillna(0.0)).cumprod()
+    dd = eq / eq.cummax() - 1
+    return float(dd.min())
+
+
 def filter_universe(returns: pd.DataFrame,
                     excluded: list = None,
                     min_sharpe: float = None,
                     regions: list = None,
-                    max_volatility: float = None) -> pd.DataFrame:
+                    max_volatility: float = None,
+                    sectors: list = None,
+                    max_drawdown: float = None) -> pd.DataFrame:
     """Apply pre-clustering filters to the universe."""
     df = returns.copy()
     # Keep only columns with at least 90% coverage; fill remaining NaN with 0
@@ -111,6 +120,9 @@ def filter_universe(returns: pd.DataFrame,
     if regions:
         keep = [c for c in df.columns if ticker_region(c) in regions]
         df = df[keep]
+    if sectors:
+        keep = [c for c in df.columns if ticker_sector(c) in sectors]
+        df = df[keep]
     if min_sharpe is not None:
         ann_ret = df.mean() * 12
         ann_vol = df.std() * np.sqrt(12)
@@ -120,6 +132,11 @@ def filter_universe(returns: pd.DataFrame,
     if max_volatility is not None:
         ann_vol = df.std() * np.sqrt(12)
         keep = ann_vol[ann_vol <= max_volatility].index
+        df = df[keep]
+    if max_drawdown is not None:
+        # max_drawdown es negativo (ej -0.30 = -30%). Mantener solo los menos malos.
+        dds = df.apply(asset_max_drawdown)
+        keep = dds[dds >= max_drawdown].index
         df = df[keep]
     return df
 
@@ -152,6 +169,8 @@ def optimize_portfolio(returns: pd.DataFrame,
                        min_sharpe: float = None,
                        regions: list = None,
                        max_volatility: float = None,
+                       sectors: list = None,
+                       max_drawdown: float = None,
                        risk_free: float = 0.04):
     """Full pipeline: filter → cluster → select representatives → max Sharpe."""
     pinned = pinned or []
@@ -159,7 +178,8 @@ def optimize_portfolio(returns: pd.DataFrame,
 
     # Filter universe (but always keep pinned)
     filtered = filter_universe(returns, excluded=excluded, min_sharpe=min_sharpe,
-                               regions=regions, max_volatility=max_volatility)
+                               regions=regions, max_volatility=max_volatility,
+                               sectors=sectors, max_drawdown=max_drawdown)
     for p in pinned:
         if p in returns.columns and p not in filtered.columns:
             filtered[p] = returns[p]
@@ -225,12 +245,14 @@ def asset_metrics(returns: pd.DataFrame, weights: pd.Series, risk_free: float = 
     annual_vol    = sub.std() * np.sqrt(12)
     sharpe        = (annual_return - risk_free) / annual_vol
     region        = [ticker_region(t) for t in weights.index]
+    sector        = [ticker_sector(t) for t in weights.index]
     df = pd.DataFrame({
         "weight": weights,
         "annual_return": annual_return,
         "volatility": annual_vol,
         "sharpe": sharpe,
         "region": region,
+        "sector": sector,
     })
     return df.sort_values("weight", ascending=False)
 
@@ -240,6 +262,26 @@ def equity_curve(returns_series: pd.Series) -> pd.Series:
 
 
 BENCHMARK_TICKERS = ("SPY", "ACWI", "AGG", "EFA")
+
+
+_SECTORS_CACHE = None
+def load_sectors() -> dict:
+    """Cargar el mapa ticker → sector. Devuelve {} si no existe el archivo."""
+    global _SECTORS_CACHE
+    if _SECTORS_CACHE is not None:
+        return _SECTORS_CACHE
+    from pathlib import Path
+    p = Path("data/sectors.parquet")
+    if not p.exists():
+        _SECTORS_CACHE = {}
+        return _SECTORS_CACHE
+    df = pd.read_parquet(p)
+    _SECTORS_CACHE = dict(zip(df["ticker"], df["sector"]))
+    return _SECTORS_CACHE
+
+
+def ticker_sector(ticker: str) -> str:
+    return load_sectors().get(ticker, "Desconocido")
 
 
 def get_benchmark(returns: pd.DataFrame, ticker: str = "SPY") -> pd.Series:
@@ -274,7 +316,9 @@ def backtest_strategy(returns: pd.DataFrame, n_clusters: int = 50,
                       min_weight: float = 0.0, max_weight: float = 1.0,
                       pinned: list = None, excluded: list = None,
                       min_sharpe: float = None, regions: list = None,
-                      max_volatility: float = None):
+                      max_volatility: float = None,
+                      sectors: list = None,
+                      max_drawdown: float = None):
     """Walk-forward backtest. Returns a Series of monthly portfolio returns."""
     portfolio_returns = []
     start_idx = train_months
@@ -290,7 +334,8 @@ def backtest_strategy(returns: pd.DataFrame, n_clusters: int = 50,
                                      min_weight=min_weight, max_weight=max_weight,
                                      pinned=pinned, excluded=excluded,
                                      min_sharpe=min_sharpe, regions=regions,
-                                     max_volatility=max_volatility)
+                                     max_volatility=max_volatility,
+                                     sectors=sectors, max_drawdown=max_drawdown)
             w = res["weights"]
             w = w[w > 0]
             common = w.index.intersection(test.columns)

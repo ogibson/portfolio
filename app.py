@@ -19,7 +19,7 @@ from explorer_lib import (
     UNIVERSE_SOURCES, REGION_GROUP, ticker_region,
     BENCHMARK_TICKERS, get_benchmark, drop_benchmarks, perf_stats,
     optimize_portfolio, asset_metrics, equity_curve, backtest_strategy,
-    buy_and_hold_backtest,
+    buy_and_hold_backtest, ticker_sector, load_sectors, asset_max_drawdown,
 )
 
 st.set_page_config(page_title="Estrategia de Clustering para Portafolios",
@@ -83,7 +83,7 @@ def cached_returns():
 # ─────────────────────────────────────────────────────────────────
 # Pestañas
 # ─────────────────────────────────────────────────────────────────
-home_tab, tool_tab = st.tabs(["📖 La Historia", "🛠 La Herramienta"])
+home_tab, tool_tab = st.tabs(["📖 Teoría", "🛠 Herramienta"])
 
 
 # =================================================================
@@ -133,8 +133,8 @@ with home_tab:
     <div class='workflow-step'><strong>Paso 7:</strong> Se concluye con la aplicación tradicional de Markowitz, para optimizar la composición del portafolio maximizando el ratio de Sharpe.</div>
     """, unsafe_allow_html=True)
 
-    # ── 1. Diseñando el Universo ──
-    st.markdown("## 1. Diseñando el Universo")
+    # ── 1. Eligiendo el Universo ──
+    st.markdown("## 1. Eligiendo el Universo")
     st.markdown("**¿Qué activos entran en el conjunto candidato?**")
     st.markdown("""
     Elegimos activos individuales y no ETFs (no queremos un *fondo de fondos*; queremos el comportamiento
@@ -155,7 +155,7 @@ with home_tab:
         st.image(str(STORY_DIR / "universe.png"), use_container_width=True)
 
     # ── 2. Cálculo de la matriz de correlaciones ──
-    st.markdown("## 2. Cálculo de la matriz de correlaciones")
+    st.markdown("## 2. Cálculo de la matriz de correlaciones y los problemas que nos trajo")
     st.markdown("""
     Si quisiéramos aplicar el modelo de Markowitz como suele utilizarse en finanzas para optimizar directamente
     la composición del portafolio, deberíamos calcular la matriz de covarianzas sobre los 2,000 activos que se
@@ -165,7 +165,7 @@ with home_tab:
     Apple-Toyota, etc.) intenta capturar qué tan juntos se mueven. Con 2,000 activos hay alrededor de
     **2 millones de relaciones** distintas que estimar. Pero solo tenemos **60 meses de historia** para estimarlas.
     El problema no es que no se pueda calcular la matriz, la fórmula funciona y devuelve números.
-    **El problema es que esos números están llenos de ruido.**
+    **El problema es que esos números tienen ruido estadístico.**
 
     ### ¿De dónde viene el ruido?
 
@@ -185,7 +185,7 @@ with home_tab:
 
     ### Cuánto ruido
 
-    Hay una regla aproximada: el ruido en una correlación estimada es de aproximadamente:
+    **A modo de aproximación**, derivada de la fórmula clásica del error estándar muestral, el ruido típico en una correlación estimada es del orden de:
 
     > ruido ≈ 1 / √(número de observaciones)
 
@@ -195,24 +195,31 @@ with home_tab:
 
     Esto significa que cada correlación que calculamos tiene un **error típico de ±0.13** alrededor del valor verdadero.
 
-    ### El verdadero problema: dos activos sin relación
+    """)
 
-    Pensemos en dos activos cuya correlación verdadera es **0** (no tienen ninguna relación real).
-    Con 60 meses, nuestro estimado va a oscilar entre **-0.13 y +0.13** solo por puro azar.
+    st.markdown("""
+    <div class='explainer-box'>
+    <strong>El problema de forma intuitiva</strong>
+    <br><br>
+    Pensemos en dos activos cuya correlación verdadera es <strong>0</strong> (no tienen ninguna relación real).
+    Con 60 meses, nuestro estimado va a oscilar entre <strong>-0.13 y +0.13</strong> solo por puro azar.
+    <br><br>
+    Ahora, el optimizador de Markowitz miraría una correlación de -0.13 y piensa:
+    <em>"¡Estos dos activos van en direcciones opuestas! Es diversificación gratis, voy a cargar peso acá."</em>
+    <br><br>
+    Pero esa correlación de -0.13 <strong>no significa nada</strong>, ya que la relación real es cero.
+    El optimizador acaba de apostar el portafolio a una "oportunidad" que solo existe en los datos pasados,
+    no en la realidad.
+    <br><br>
+    Con 2,000 activos tenemos <strong>2 millones de pares</strong>. Si cada uno tiene un ruido típico de ±0.13,
+    muchos de esos 2 millones van a aterrizar por azar en valores que <strong>parecen relaciones reales
+    pero no lo son</strong>. El optimizador, que busca correlaciones extremas para construir el portafolio,
+    va a encontrar miles de "oportunidades" falsas, y esto nos generaba fallos al intentar aplicar el modelo
+    de Markowitz sin alteraciones.
+    </div>
+    """, unsafe_allow_html=True)
 
-    Ahora, el optimizador de Markowitz mira una correlación de -0.13 y piensa:
-    *"¡Estos dos activos van en direcciones opuestas! Es diversificación gratis, voy a cargar peso acá."*
-
-    Pero esa correlación de -0.13 **no significa nada**, ya que la relación real es cero.
-    El optimizador acaba de apostar el portafolio a una "oportunidad" que solo existe en los datos pasados, no en la realidad.
-
-    ### Por qué empeora con 2,000 activos
-
-    Con 2,000 activos tenemos **2 millones de pares**. Si cada uno tiene un ruido típico de ±0.13, muchos
-    de esos 2 millones van a aterrizar por azar en valores que **parecen relaciones reales pero no lo son**.
-    El optimizador, que busca correlaciones extremas para construir el portafolio, va a encontrar miles
-    de "oportunidades" falsas, y esto nos generaba fallos al intentar aplicar el modelo de Markowitz sin alteraciones.
-
+    st.markdown("""
     ### Por qué con más datos sería menos malo
 
     Con 600 meses (50 años) de datos:
@@ -226,10 +233,10 @@ with home_tab:
 
     ### La solución a este problema
 
-    Para que Markowitz funcione necesitamos atacar el problema en **dos frentes complementarios**:
-
-    1. **Reducir el universo a un número manejable de activos** mediante clustering (sección 3). Esto pasa de 2 millones de pares ruidosos a solo ~1,275 pares.
-    2. **Limpiar lo que queda** con la reducción de Ledoit-Wolf antes de optimizar (sección 6). Esto suaviza los valores extremos que aún sobreviven.
+    Para que Markowitz funcione necesitamos entonces primero reducir el universo a un número manejable
+    de activos mediante clustering (sección 3). Esto pasa de 2 millones de pares ruidosos a solo ~1,275 pares.
+    Para esto calculamos la matriz de correlación, aunque resulte ruidosa, y utilizamos el clustering sobre
+    esta matriz para elegir los activos.
     """)
 
     # ── 3. Clustering de los datos ──
@@ -237,7 +244,7 @@ with home_tab:
     st.markdown("""
     En este paso buscamos reducir 2,000 activos a N grupos con comportamiento similar, para seleccionar luego
     los N activos candidatos. Los activos que se mueven juntos (alta correlación) actúan casi como sustitutos
-    entre sí. Tener cualquiera de ellos te da prácticamente la misma exposición que tener cualquier otro del grupo.
+    entre sí. Tener cualquiera de ellos te da una exposición al riesgo muy similar que tener cualquier otro del grupo.
 
     Aplicamos **clustering jerárquico (Ward)** sobre una matriz de distancias derivada de las correlaciones:
 
@@ -312,10 +319,10 @@ with home_tab:
         </tr>
       </thead>
       <tbody>
-        <tr style="background:#d4edda;">
-          <td style="padding:8px; border:1px solid #ccc;"><strong>✓ Mayor Sharpe individual</strong> (elegida)</td>
-          <td style="padding:8px; border:1px solid #ccc;">Mejor retorno ajustado por riesgo del grupo</td>
-          <td style="padding:8px; border:1px solid #ccc;">Puede sobreajustarse a ganadores del pasado</td>
+        <tr style="background:#d4edda; color:#1a2940;">
+          <td style="padding:8px; border:1px solid #ccc; color:#1a2940;"><strong style="color:#0d1e3a;">✓ Mayor Sharpe individual</strong> (elegida)</td>
+          <td style="padding:8px; border:1px solid #ccc; color:#1a2940;">Mejor retorno ajustado por riesgo del grupo</td>
+          <td style="padding:8px; border:1px solid #ccc; color:#1a2940;">Puede sobreajustarse a ganadores del pasado</td>
         </tr>
         <tr>
           <td style="padding:8px; border:1px solid #ccc;">Mayor retorno</td>
@@ -347,15 +354,13 @@ with home_tab:
     st.markdown("## 5, 6 y 7. Optimizando los Pesos de los N Representantes")
     st.markdown("""
     Una vez que ya tenemos los N representantes elegidos, **descartamos por completo la matriz de 2,000 activos
-    y construimos una nueva matriz de covarianza desde cero, solo con los 50 elegidos**.
+    y construimos una nueva matriz de covarianza desde cero, solo con los 50 elegidos, para proceder con una
+    aplicación más tradicional de Markowitz.**
 
     ### Ledoit-Wolf en este paso
 
-    Aplicamos Ledoit-Wolf sobre la matriz nueva de 50×50 (no sobre la original de 2,000×2,000).
-    Ledoit-Wolf es un pulido final que:
-
-    - Empuja los valores extremos que aún sobreviven hacia el promedio
-    - Estabiliza los pesos entre rebalanceos (menos turnover si se ejecutara en la vida real)
+    Aplicamos Ledoit-Wolf sobre la matriz nueva de 50×50 (no sobre la original de 2,000×2,000). Ledoit-Wolf es
+    un pulido final que empuja los valores extremos que aún sobreviven hacia el promedio.
 
     Decidimos aplicar Ledoit-Wolf porque en nuestros experimentos notamos que de no estabilizar la matriz
     de covarianzas usualmente terminábamos con portfolios imposibles con ratio de Sharpe artificialmente inflado.
@@ -390,7 +395,7 @@ with home_tab:
         <tr>
           <td style="padding:8px; border:1px solid #ccc;"><strong># de clusters (N)</strong></td>
           <td style="padding:8px; border:1px solid #ccc;">Cantidad de activos en el portafolio final</td>
-          <td style="padding:8px; border:1px solid #ccc;">Más clusters = portafolio más diversificado y granular; menos clusters = portafolio concentrado</td>
+          <td style="padding:8px; border:1px solid #ccc;">Más clusters es portafolio más diversificado y granular; menos clusters es un portafolio más concentrado</td>
         </tr>
         <tr>
           <td style="padding:8px; border:1px solid #ccc;"><strong>Peso mínimo / máximo</strong></td>
@@ -400,7 +405,7 @@ with home_tab:
         <tr>
           <td style="padding:8px; border:1px solid #ccc;"><strong>Sharpe individual mínimo</strong></td>
           <td style="padding:8px; border:1px solid #ccc;">Filtra activos con bajo retorno ajustado por riesgo</td>
-          <td style="padding:8px; border:1px solid #ccc;">Excluye candidatos débiles antes del clustering. Más alto = universo más exigente</td>
+          <td style="padding:8px; border:1px solid #ccc;">Excluye candidatos débiles antes del clustering. Más alto implica un universo más exigente</td>
         </tr>
         <tr>
           <td style="padding:8px; border:1px solid #ccc;"><strong>Tolerancia al riesgo</strong></td>
@@ -410,12 +415,12 @@ with home_tab:
         <tr>
           <td style="padding:8px; border:1px solid #ccc;"><strong>Activos fijos</strong></td>
           <td style="padding:8px; border:1px solid #ccc;">Acciones que se incluyen sí o sí</td>
-          <td style="padding:8px; border:1px solid #ccc;">Reemplazan al representante de su cluster — útil para inyectar una tésis de inversión sin perder diversificación</td>
+          <td style="padding:8px; border:1px solid #ccc;">Reemplazan al representante de su cluster. Útil para inyectar una tésis de inversión sin perder diversificación</td>
         </tr>
         <tr>
           <td style="padding:8px; border:1px solid #ccc;"><strong>Activos excluidos</strong></td>
           <td style="padding:8px; border:1px solid #ccc;">Acciones que nunca entran al universo</td>
-          <td style="padding:8px; border:1px solid #ccc;">Filtra empresas específicas por razones éticas, de exposición o personales</td>
+          <td style="padding:8px; border:1px solid #ccc;">Filtra empresas específicas</td>
         </tr>
         <tr>
           <td style="padding:8px; border:1px solid #ccc;"><strong>Regiones</strong></td>
@@ -484,9 +489,6 @@ with home_tab:
 
     # ── Resultados ──
     st.markdown("## Los Resultados")
-    if (STORY_DIR / "drawdown.png").exists():
-        st.image(str(STORY_DIR / "drawdown.png"), use_container_width=True)
-        st.caption("**Drawdown (gráfico de inmersión):** la peor pérdida desde un pico anterior en cada momento. Un punto de −20% significa que en ese momento el portafolio estaba 20% por debajo de su máximo previo.")
     if (STORY_DIR / "rolling_sharpe.png").exists():
         st.image(str(STORY_DIR / "rolling_sharpe.png"), use_container_width=True)
         st.caption("**Sharpe móvil a 12 meses:** ¿la estrategia es consistentemente buena, o depende de un solo trimestre afortunado?")
@@ -519,7 +521,7 @@ with home_tab:
     es ruido**, y solo una fracción de los beneficios esperados se materializa al analizarlo en un escenario real.
     """)
 
-    st.success("**Pruébalo tú mismo** en la pestaña **🛠 La Herramienta** — mueve las palancas y observa cómo cambia el portafolio.")
+    st.success("**Pruébalo tú mismo** en la pestaña **🛠 Herramienta** — mueve las palancas y observa cómo cambia el portafolio.")
 
 
 
@@ -534,6 +536,11 @@ with tool_tab:
     investable = drop_benchmarks(RETURNS)
     all_regions = sorted({ticker_region(t) for t in investable.columns})
     all_tickers = sorted(investable.columns.tolist())
+    sectors_map = load_sectors()
+    all_sectors = sorted({s for s in sectors_map.values() if s and s != "Desconocido"})
+
+    # Pre-compute individual max drawdowns para mostrar percentiles en el slider
+    individual_dds = investable.apply(asset_max_drawdown).dropna()
 
     # Percentiles de volatilidad (anualizada) sobre el universo, para los botones de tolerancia
     asset_vols = (investable.std() * np.sqrt(12)).dropna()
@@ -545,7 +552,8 @@ with tool_tab:
     # El slider trabaja en puntos porcentuales enteros (5, 50, 100) para que el formato sea claro;
     # convertimos a decimal cuando lo usamos.
     if "max_vol_pct" not in st.session_state:
-        st.session_state.max_vol_pct = int(round(VOL_P75 * 100))
+        # Default = máximo permisivo (no filtra nada)
+        st.session_state.max_vol_pct = int(round(VOL_MAX * 100))
 
     with st.sidebar:
         st.header("Controles")
@@ -554,12 +562,15 @@ with tool_tab:
         n_clusters = st.slider("# de clusters (tamaño del portafolio)", 5, 100, 20,
                                help="Número de grupos behaviorales en los que dividir el universo. Se elige un representante por cluster. Más clusters = portafolio más granular.")
         col_a, col_b = st.columns(2)
-        min_w = col_a.slider("Peso mínimo", 0.0, 0.10, 0.0, 0.005, format="%.1f%%",
-                             help="Piso del peso por activo. Si lo subes por encima de 0, fuerzas a que todos los activos seleccionados estén en el portafolio. En 0, el optimizador puede eliminar activos débiles.")
-        max_w = col_b.slider("Peso máximo", 0.05, 1.0, 0.25, 0.05, format="%.0f%%",
-                             help="Techo del peso por activo. Evita la concentración en una sola acción.")
-        min_sharpe = st.slider("Sharpe individual mínimo", -1.0, 2.5, 0.0, 0.1,
-                               help="Excluye activos cuyo Sharpe individual histórico esté por debajo de este umbral. Más alto = universo más exigente.")
+        # Los sliders trabajan en puntos porcentuales enteros para evitar bugs de formato.
+        min_w_pct = col_a.slider("Peso mínimo", 0, 10, 0, 1, format="%d%%",
+                                 help="Piso del peso por activo. Si lo subes por encima de 0, fuerzas a que todos los activos seleccionados estén en el portafolio. En 0 (default), el optimizador puede eliminar activos débiles.")
+        max_w_pct = col_b.slider("Peso máximo", 5, 100, 100, 5, format="%d%%",
+                                 help="Techo del peso por activo. En 100% (default), no hay límite por activo.")
+        min_w = min_w_pct / 100.0
+        max_w = max_w_pct / 100.0
+        min_sharpe = st.slider("Sharpe individual mínimo", -1.0, 2.5, -1.0, 0.1,
+                               help="Excluye activos cuyo Sharpe individual histórico esté por debajo de este umbral. En -1.0 (default) no filtra nada. Más alto = universo más exigente.")
 
         st.markdown("**Tolerancia al riesgo**")
         st.caption("Excluye los activos cuya volatilidad anual histórica supere este umbral, antes de hacer clustering.")
@@ -575,6 +586,16 @@ with tool_tab:
                                 format="%d%%", key="max_vol_pct",
                                 help="Filtro aplicado antes del clustering. Los botones de arriba mueven este slider al percentil 25/50/75 del universo.")
         max_vol = max_vol_pct / 100.0
+
+        # Drawdown máximo individual permitido
+        st.markdown("**Drawdown máximo individual**")
+        st.caption("Excluye activos cuya peor caída histórica desde un pico sea peor que este umbral.")
+        max_dd_pct = st.slider("Drawdown máximo aceptado",
+                               min_value=-90, max_value=-5, value=-90, step=5,
+                               format="%d%%",
+                               help="Drawdown = peor pérdida desde un pico anterior. Un valor de -30% deja afuera todo activo que en algún momento haya perdido más del 30% desde su máximo. En -90% (default) no filtra nada. Más cerca de 0 = filtro más exigente.")
+        max_dd = max_dd_pct / 100.0
+
         pinned = st.multiselect(
             "Activos fijos (incluir siempre)",
             options=all_tickers,
@@ -587,6 +608,13 @@ with tool_tab:
             help="Escribe para buscar y excluir activos del universo. Útil para descartar empresas específicas antes del clustering.")
         regions_sel = st.multiselect("Regiones", all_regions, default=all_regions,
                                      help="Restringe el universo a las regiones elegidas. Vacío = ninguna.")
+        if all_sectors:
+            sectors_sel = st.multiselect(
+                "Sectores", all_sectors, default=all_sectors,
+                help="Restringe el universo a los sectores elegidos. Permite construir un portafolio temático (ej. solo Technology + Healthcare).")
+        else:
+            sectors_sel = []
+            st.caption("⚠️ Datos de sectores no disponibles. Corre `python3 fetch_sectors.py` para descargarlos.")
         run_backtest = st.checkbox("Ejecutar backtest fuera de muestra", True,
                                    help="Si está activado, corre también el backtest walk-forward. Agrega ~30 segundos pero produce el Sharpe realizado honesto.")
         go = st.button("🚀 Optimizar", use_container_width=True, type="primary")
@@ -600,6 +628,8 @@ with tool_tab:
         with st.spinner("Optimizando portafolio... (puede tomar 20-40 segundos con backtest)"):
             try:
                 regions = regions_sel if len(regions_sel) < len(all_regions) else None
+                sectors_filter = (sectors_sel if all_sectors and 0 < len(sectors_sel) < len(all_sectors)
+                                  else None)
                 common_kwargs = dict(
                     n_clusters=n_clusters,
                     min_weight=min_w, max_weight=max_w,
@@ -607,6 +637,8 @@ with tool_tab:
                     min_sharpe=min_sharpe if min_sharpe > -0.99 else None,
                     regions=regions,
                     max_volatility=max_vol if max_vol < VOL_MAX else None,
+                    sectors=sectors_filter,
+                    max_drawdown=max_dd if max_dd > -0.89 else None,
                 )
                 st.session_state.result = optimize_portfolio(RETURNS, **common_kwargs)
                 st.session_state.bt = None
@@ -690,7 +722,7 @@ with tool_tab:
 
         # Composición
         st.markdown("### Composición")
-        st.caption("Cómo se reparte el capital entre los activos elegidos y cómo se traduce en regiones.")
+        st.caption("Cómo se reparte el capital entre los activos elegidos y cómo se traduce en regiones y sectores.")
         col_p, col_r = st.columns([1.2, 1])
         with col_p:
             fig, ax = plt.subplots(figsize=(6, 6))
@@ -708,6 +740,16 @@ with tool_tab:
             ax.set_title("Por región")
             st.pyplot(fig, use_container_width=True)
 
+        # Distribución por sector
+        if "sector" in metrics.columns and (metrics["sector"] != "Desconocido").any():
+            fig, ax = plt.subplots(figsize=(11, 4))
+            by_sector = metrics.groupby("sector")["weight"].sum().sort_values(ascending=False)
+            ax.barh(by_sector.index, by_sector.values, color="#3a7a3a")
+            ax.invert_yaxis()
+            ax.set_xlabel("Peso"); ax.xaxis.set_major_formatter(plt.matplotlib.ticker.PercentFormatter(1.0))
+            ax.set_title("Por sector")
+            st.pyplot(fig, use_container_width=True)
+
         # Tabla por activo (incluye los descartados con peso 0)
         st.markdown("### Detalle por activo")
         st.caption("Una fila por activo seleccionado por el clustering. "
@@ -718,7 +760,7 @@ with tool_tab:
         view["annual_return"] = (view["annual_return"] * 100).round(2)
         view["volatility"] = (view["volatility"] * 100).round(2)
         view["sharpe"] = view["sharpe"].round(2)
-        view.columns = ["Peso %", "Retorno anual %", "Volatilidad %", "Sharpe", "Región"]
+        view.columns = ["Peso %", "Retorno anual %", "Volatilidad %", "Sharpe", "Región", "Sector"]
         st.dataframe(view, use_container_width=True)
 
         # Curva de capital
@@ -731,9 +773,6 @@ with tool_tab:
         if "SPY" in RETURNS.columns:
             spy_eq = (1 + RETURNS["SPY"].loc[in_sample_returns.index].dropna()).cumprod()
             ax.plot(spy_eq.index, spy_eq.values, label="SPY", linewidth=2, color="#a55c3f", alpha=0.85)
-        if bt is not None and len(bt):
-            ax.plot(equity_curve(bt).index, equity_curve(bt).values,
-                    label="Backtest fuera de muestra (estrategia)", linewidth=2, linestyle="--", color="#3a7a3a")
         ax.legend(); ax.grid(alpha=0.3)
         ax.set_ylabel("Valor acumulado")
         st.pyplot(fig, use_container_width=True)
