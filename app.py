@@ -600,7 +600,19 @@ with tool_tab:
             "Activos fijos (incluir siempre)",
             options=all_tickers,
             default=[],
-            help="Escribe para buscar entre los ~2,000 activos del universo. Cada activo elegido reemplaza al representante automático de su cluster — la diversificación entre clusters se mantiene.")
+            help="Escribe para buscar entre los ~2,000 activos del universo. Cada activo elegido se incluye en el portafolio.")
+        pinned_min_weight = {}
+        if pinned:
+            st.caption("Peso mínimo garantizado para cada activo fijo:")
+            for tk in pinned:
+                pct = st.slider(
+                    tk,
+                    min_value=0, max_value=20,
+                    value=int(round(st.session_state.get(f"pinmin_{tk}", 1))),
+                    step=1, format="%d%%",
+                    key=f"pinmin_{tk}",
+                    help=f"Peso mínimo de {tk}. Default 1%. Si lo dejas en 0% el optimizador puede ponerlo en cero.")
+                pinned_min_weight[tk] = pct / 100.0
         excluded = st.multiselect(
             "Activos excluidos",
             options=all_tickers,
@@ -639,6 +651,7 @@ with tool_tab:
                     max_volatility=max_vol if max_vol < VOL_MAX else None,
                     sectors=sectors_filter,
                     max_drawdown=max_dd if max_dd > -0.89 else None,
+                    pinned_min_weight=pinned_min_weight,
                 )
                 st.session_state.result = optimize_portfolio(RETURNS, **common_kwargs)
                 st.session_state.bt = None
@@ -660,7 +673,7 @@ with tool_tab:
         st.info("Configura las palancas en la barra lateral y presiona **Optimizar** para construir un portafolio.")
     else:
         weights_all = result["weights"].sort_values(ascending=False)
-        weights = weights_all[weights_all > 0.001]
+        weights = weights_all[weights_all > 0]
         perf = result["performance"]
         metrics_all = asset_metrics(result["selected_returns"], weights_all)
         metrics = metrics_all.loc[weights.index]
@@ -672,7 +685,7 @@ with tool_tab:
 
         st.markdown("### Métricas principales")
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Activos", len(weights), help="Número de activos con peso superior al 0.1%.")
+        c1.metric("Activos", len(weights), help="Número de activos con peso mayor a 0 en el portafolio.")
 
         # Diferencias numéricas vs SPY (con signo) para que Streamlit colore correctamente.
         def _pp(diff):  # formatea una diferencia de puntos porcentuales

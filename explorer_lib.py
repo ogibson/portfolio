@@ -171,6 +171,7 @@ def optimize_portfolio(returns: pd.DataFrame,
                        max_volatility: float = None,
                        sectors: list = None,
                        max_drawdown: float = None,
+                       pinned_min_weight: float = 0.01,
                        risk_free: float = 0.04):
     """Full pipeline: filter → cluster → select representatives → max Sharpe."""
     pinned = pinned or []
@@ -189,40 +190,44 @@ def optimize_portfolio(returns: pd.DataFrame,
 
     clusters, reps, Z = cluster_and_pick(filtered, n_clusters)
 
-    # Build ticker → cluster_id map so we can replace each cluster's auto-rep
-    # with any pinned asset that belongs to the same cluster.
+    # Build ticker → cluster_id map
     ticker_to_cluster = {}
     for cid, tickers in clusters.items():
         for t in tickers:
             ticker_to_cluster[t] = cid
 
-    # Map cluster_id → chosen representative (start with auto-picked reps)
+    # Map cluster_id → auto-picked representative
     cluster_rep = {}
     for r in reps:
         cluster_rep[ticker_to_cluster[r]] = r
 
-    # For each pinned asset present in the filtered universe, override the
-    # representative of its cluster. If two pinned assets fall in the same
-    # cluster, the latter wins (a small ambiguity; rare in practice).
-    pinned_in = [p for p in pinned if p in filtered.columns]
-    for p in pinned_in:
-        cid = ticker_to_cluster[p]
-        cluster_rep[cid] = p
+    pinned_in = list(dict.fromkeys(p for p in pinned if p in filtered.columns))
 
-    final_assets = list(cluster_rep.values())
+    # Final assets:
+    # 1. Todos los pinned siempre van incluidos (aunque compartan cluster).
+    # 2. De los clusters que NO tienen pinned, agregamos su representante automático.
+    pinned_clusters = {ticker_to_cluster[p] for p in pinned_in}
+    final_assets = list(pinned_in)
+    for cid, rep in cluster_rep.items():
+        if cid not in pinned_clusters:
+            final_assets.append(rep)
 
     sub = filtered[final_assets]
     mu = expected_returns.mean_historical_return(sub, returns_data=True, frequency=12)
     S  = risk_models.CovarianceShrinkage(sub, returns_data=True, frequency=12).ledoit_wolf()
     n  = len(final_assets)
     upper = max(max_weight, 1.5 / n)
-    # Per-asset bounds: pinned assets get a floor of max(min_weight, 1%) so the
-    # optimizer can't zero them out. Non-pinned assets can go to min_weight.
-    pinned_floor = max(min_weight, 0.01)
-    bounds = [
-        (pinned_floor if a in pinned_in else min_weight, upper)
-        for a in final_assets
-    ]
+    # Per-asset bounds: pinned assets get a floor so the optimizer can't zero them
+    # out. `pinned_min_weight` can be a float (global) or a dict {ticker: weight}.
+    def _floor_for(asset):
+        if asset not in pinned_in:
+            return min_weight
+        if isinstance(pinned_min_weight, dict):
+            v = pinned_min_weight.get(asset, 0.01)
+        else:
+            v = pinned_min_weight
+        return max(min_weight, v)
+    bounds = [(_floor_for(a), upper) for a in final_assets]
     ef = EfficientFrontier(mu, S, weight_bounds=bounds)
     ef.max_sharpe(risk_free_rate=risk_free)
     weights = ef.clean_weights()
@@ -318,7 +323,8 @@ def backtest_strategy(returns: pd.DataFrame, n_clusters: int = 50,
                       min_sharpe: float = None, regions: list = None,
                       max_volatility: float = None,
                       sectors: list = None,
-                      max_drawdown: float = None):
+                      max_drawdown: float = None,
+                      pinned_min_weight: float = 0.01):
     """Walk-forward backtest. Returns a Series of monthly portfolio returns."""
     portfolio_returns = []
     start_idx = train_months
@@ -335,7 +341,8 @@ def backtest_strategy(returns: pd.DataFrame, n_clusters: int = 50,
                                      pinned=pinned, excluded=excluded,
                                      min_sharpe=min_sharpe, regions=regions,
                                      max_volatility=max_volatility,
-                                     sectors=sectors, max_drawdown=max_drawdown)
+                                     sectors=sectors, max_drawdown=max_drawdown,
+                                     pinned_min_weight=pinned_min_weight)
             w = res["weights"]
             w = w[w > 0]
             common = w.index.intersection(test.columns)
