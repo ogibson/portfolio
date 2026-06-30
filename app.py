@@ -631,8 +631,6 @@ with tool_tab:
         else:
             sectors_sel = []
             st.caption("⚠️ Datos de sectores no disponibles. Corre `python3 fetch_sectors.py` para descargarlos.")
-        run_backtest = st.checkbox("Ejecutar backtest fuera de muestra", True,
-                                   help="Si está activado, corre también el backtest walk-forward. Agrega ~30 segundos pero produce el Sharpe realizado honesto.")
         go = st.button("🚀 Optimizar", use_container_width=True, type="primary")
 
     if "result" not in st.session_state:
@@ -661,14 +659,11 @@ with tool_tab:
                     pinned_min_weight=pinned_min_weight,
                 )
                 st.session_state.result = optimize_portfolio(RETURNS, **common_kwargs)
-                st.session_state.bt = None
-                st.session_state.bh = None
-                if run_backtest:
-                    st.session_state.bt = backtest_strategy(RETURNS, **common_kwargs)
-                    # Buy-and-hold: entrenar con primeros 3 años, holdear los siguientes 2
-                    st.session_state.bh = buy_and_hold_backtest(
-                        RETURNS, train_months=36, hold_months=24, **common_kwargs
-                    )
+                st.session_state.bt = backtest_strategy(RETURNS, **common_kwargs)
+                # Buy-and-hold: entrenar con primeros 3 años, holdear los siguientes 2
+                st.session_state.bh = buy_and_hold_backtest(
+                    RETURNS, train_months=36, hold_months=24, **common_kwargs
+                )
             except Exception as e:
                 st.error(f"Falló la optimización: {e}")
 
@@ -914,10 +909,10 @@ with tool_tab:
             st.pyplot(fig, use_container_width=True)
 
         # Correlación
-        with st.expander("🔥 Matriz de correlación (activos elegidos)", expanded=False):
-            st.caption("Correlación entre las tenencias. Rojo = se mueven juntas, azul = se mueven opuestas, blanco = independientes. Buena diversificación = mayoría de colores pálidos.")
+        with st.expander("🔥 Matriz de correlación (todos los representantes seleccionados)", expanded=False):
+            st.caption("Correlación entre todos los activos del portafolio, incluyendo los fijos (pinned) y los que el optimizador dejó en 0%. Rojo = se mueven juntas, azul = se mueven opuestas, blanco = independientes. Buena diversificación = mayoría de colores pálidos.")
             fig, ax = plt.subplots(figsize=(9, 7))
-            corr = result["selected_returns"][weights.index].corr()
+            corr = result["selected_returns"].corr()
             sns.heatmap(corr, cmap="coolwarm", center=0, vmin=-1, vmax=1, ax=ax,
                         cbar_kws={"label": "Correlación"})
             st.pyplot(fig, use_container_width=True)
