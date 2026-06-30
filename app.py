@@ -95,55 +95,56 @@ with home_tab:
                 "para escoger **qué activos comprar y en qué proporción**, "
                 "desde un universo de miles de acciones globales.*")
 
-    # Resultado principal
-    try:
-        headline = json.loads((STORY_DIR / "headline_metrics.json").read_text())
-        s, b = headline["strategy"], headline["spy"]
-        st.markdown("### Resultado principal")
-        st.markdown(f"Durante **{headline['n_periods']} meses fuera de muestra** "
-                    f"({headline['start']} → {headline['end']}), "
-                    f"la estrategia obtuvo un **Sharpe realizado de {s['sharpe']:.2f}** "
-                    f"frente al **{b['sharpe']:.2f} del SPY**, "
-                    f"con un retorno total de **{s['total_return']:.0%}** "
-                    f"contra **{b['total_return']:.0%}** del SPY.")
-        st.image(str(STORY_DIR / "hero_equity.png"), use_container_width=True)
-    except Exception as e:
-        st.warning(f"No se encontraron los archivos precalculados. Ejecuta primero `python3 precompute.py`. ({e})")
-
-    # ── 1. El problema ──
-    st.markdown("## 1. El Problema")
+    # ── El Problema ──
+    st.markdown("## El Problema")
     st.markdown("""
-    La **optimización de Markowitz** clásica resuelve los *pesos* de un portafolio
-    una vez que ya decidiste qué activos comprar. Responde a la pregunta:
+    La optimización de Markowitz clásica resuelve los pesos de un portafolio una vez que ya decidiste
+    qué activos comprar. Responde a la pregunta:
     > *"Dados estos 5 ETFs, ¿qué combinación maximiza el Sharpe?"*
 
-    Este proyecto invierte la pregunta. Desde un universo de **~2,000 activos globales**,
-    queremos elegir **simultáneamente qué N activos incluir y cómo ponderarlos**.
+    Este proyecto invierte la pregunta: desde un universo de ~2,000 activos globales, queremos elegir
+    simultáneamente **qué N activos incluir y cómo ponderarlos**. En teoría, esto permitiría encontrar
+    el portafolio que maximiza el retorno por unidad de riesgo. En la práctica sabemos que los resultados
+    pasados no aseguran resultados futuros, pero la herramienta puede ser útil para diseñar ETFs o para
+    complementar portafolios existentes con activos globales que aporten diversificación de riesgo.
 
-    ¿Por qué es difícil?
+    ### ¿Qué dificultades nos encontramos?
 
     - Elegir N activos de M es un problema **combinatorio** (NP-difícil): existen C(2000, 50) ≈ 10⁸⁵ portafolios posibles de 50 activos.
-    - No se puede ejecutar Markowitz directamente sobre 2,000 activos, porque la matriz de covarianza no se puede estimar de forma confiable con tan pocos datos (lo explicamos en detalle en la sección 4).
-
-    **Nuestro enfoque:** usar **clustering jerárquico** para reducir el universo a N representantes
-    con comportamiento distinto entre sí, y luego correr Markowitz sobre esos N.
-    El clustering convierte un problema combinatorio intratable en un pipeline limpio de dos etapas.
+    - No se puede ejecutar Markowitz directamente sobre 2,000 activos, porque la matriz de covarianza no se puede estimar de forma confiable con tan pocos datos (lo explicamos en detalle en la sección 2).
     """)
 
-    # ── 2. El universo ──
-    st.markdown("## 2. Diseñando el Universo")
+    # ── La Solución ──
+    st.markdown("## La Solución")
+    st.markdown("""
+    La solución propuesta consiste en usar **clustering jerárquico** para reducir el universo a N representantes
+    con comportamiento distinto entre sí, y luego correr Markowitz sobre esos N. El clustering convierte un
+    problema combinatorio intratable en un pipeline de dos etapas.
+
+    **El pipeline completo se ve así:**
+    """)
+    st.markdown("""
+    <div class='workflow-step'><strong>Paso 1:</strong> Se elige un universo de 2,000 activos × 60 meses.</div>
+    <div class='workflow-step'><strong>Paso 2:</strong> Se calcula la matriz de correlaciones entre los 2,000 activos.</div>
+    <div class='workflow-step'><strong>Paso 3:</strong> Se clusterizan los activos en N grupos, dependiendo de cuántos activos se quiera en el portafolio final.</div>
+    <div class='workflow-step'><strong>Paso 4:</strong> Se elige un representante por cluster, llegando a N activos.</div>
+    <div class='workflow-step'><strong>Paso 5:</strong> Se recalcula la matriz de covarianza con esos N activos.</div>
+    <div class='workflow-step'><strong>Paso 6:</strong> Se aplica Ledoit-Wolf a esa matriz nueva para estabilizar las covarianzas.</div>
+    <div class='workflow-step'><strong>Paso 7:</strong> Se concluye con la aplicación tradicional de Markowitz, para optimizar la composición del portafolio maximizando el ratio de Sharpe.</div>
+    """, unsafe_allow_html=True)
+
+    # ── 1. Diseñando el Universo ──
+    st.markdown("## 1. Diseñando el Universo")
     st.markdown("**¿Qué activos entran en el conjunto candidato?**")
     st.markdown("""
-    Elegimos **activos individuales** y no ETFs (no queremos un *fondo de fondos*; queremos
-    el comportamiento subyacente). Cubrimos mercados globales para aprovechar la diversificación
-    entre economías no correlacionadas. Un portafolio solo de EE.UU. no puede escapar a un crash sistémico estadounidense.
+    Elegimos activos individuales y no ETFs (no queremos un *fondo de fondos*; queremos el comportamiento
+    subyacente). Cubrimos mercados globales para aprovechar la diversificación entre economías no correlacionadas.
+    Un portafolio solo de EE.UU. no puede escapar a un crash sistémico estadounidense.
 
     El universo se ensambla desde **17 fuentes**: índices bursátiles y las principales tenencias de ETFs regionales.
-    """)
-    rows_html = "".join(f"<tr><td><b>{n}</b></td><td>{d}</td></tr>" for n, d in UNIVERSE_SOURCES)
-    st.markdown(f"<table>{rows_html}</table>", unsafe_allow_html=True)
+    Los datos se muestrean con **frecuencia mensual** sobre una ventana de **5 años (2021-2026)**, lo que nos da
+    60 observaciones por activo.
 
-    st.markdown("""
     **Filtros de calidad aplicados:**
     - Descartar activos con menos del 80% de cobertura en los 5 años (maneja IPOs recientes y delistings)
     - Descartar activos con cualquier retorno mensual > 50% en valor absoluto (atrapa errores de yfinance por stock splits mal ajustados)
@@ -153,39 +154,23 @@ with home_tab:
     if (STORY_DIR / "universe.png").exists():
         st.image(str(STORY_DIR / "universe.png"), use_container_width=True)
 
-    # ── 3. Frecuencia de datos ──
-    st.markdown("## 3. Eligiendo la Frecuencia de los Datos")
+    # ── 2. Cálculo de la matriz de correlaciones ──
+    st.markdown("## 2. Cálculo de la matriz de correlaciones")
     st.markdown("""
-    **¿Con qué frecuencia muestreamos los retornos?**
+    Si quisiéramos aplicar el modelo de Markowitz como suele utilizarse en finanzas para optimizar directamente
+    la composición del portafolio, deberíamos calcular la matriz de covarianzas sobre los 2,000 activos que se
+    incluyeron en el universo. Sin embargo, en la práctica esto resulta imposible.
 
-    | Frecuencia | Observaciones (5 años) | Trade-off |
-    |---|---|---|
-    | Diaria   | ~1,250 | Más datos, pero cada punto trae mucho ruido intradiario |
-    | Semanal  | 260    | Buen balance |
-    | Mensual  | 60     | Señal más limpia pero la estimación se vuelve frágil |
-
-    Contraintuitivamente, **la frecuencia mensual funcionó al menos tan bien como la semanal**
-    en nuestros experimentos fuera de muestra. La señal más limpia compensa el menor tamaño
-    de muestra, sobre todo tras aplicar la reducción de Ledoit-Wolf (siguiente sección).
-    Usamos mensual en todo el proyecto.
-    """)
-
-    # ── 4. Por qué Markowitz se rompe ──
-    st.markdown("## 4. Por Qué Markowitz Se Rompe con 2,000 Activos")
-
-    st.markdown("""
-    La matriz de covarianza es una **tabla gigante de relaciones**: para cada par de activos
-    (Apple-Microsoft, Apple-Toyota, etc.) intenta capturar qué tan juntos se mueven.
-    Con 2,000 activos hay alrededor de **2 millones de relaciones** distintas que estimar.
-    Pero solo tenemos **60 meses de historia** para estimarlas. El problema no es que no se pueda
-    calcular la matriz, la fórmula funciona y devuelve números. **El problema es que esos números
-    están llenos de ruido.**
+    La matriz de covarianza es una tabla gigante de relaciones: para cada par de activos (Apple-Microsoft,
+    Apple-Toyota, etc.) intenta capturar qué tan juntos se mueven. Con 2,000 activos hay alrededor de
+    **2 millones de relaciones** distintas que estimar. Pero solo tenemos **60 meses de historia** para estimarlas.
+    El problema no es que no se pueda calcular la matriz, la fórmula funciona y devuelve números.
+    **El problema es que esos números están llenos de ruido.**
 
     ### ¿De dónde viene el ruido?
 
-    La correlación "verdadera" entre dos activos (digamos AAPL y MSFT) es un número real que existe
-    en el mundo pero que **nunca podemos observar directamente**. Para conocerlo perfectamente
-    necesitaríamos infinitos datos.
+    La correlación "verdadera" entre dos activos (digamos AAPL y MSFT) es un número real que existe en el mundo
+    pero que **nunca podemos observar directamente**. Para conocerlo perfectamente necesitaríamos infinitos datos.
 
     Lo único que podemos hacer es **estimarlo** con los datos disponibles. En nuestro caso, 60 meses.
 
@@ -194,8 +179,8 @@ with home_tab:
     - **Ventana A** (2018-2023) → calculas la correlación AAPL-MSFT y te da 0.72
     - **Ventana B** (2019-2024) → calculas la misma correlación y te da 0.81
 
-    ¿Cuál es la "verdadera"? Ninguna. Ambas son **estimaciones ruidosas** del valor real (que tal vez
-    sea 0.77, pero no lo sabemos). La diferencia entre ambas —esos 9 puntos porcentuales— es
+    Ninguna de estos valores es la correlación verdadera. Ambas son **estimaciones ruidosas** del valor real
+    (que tal vez sea 0.77, pero no lo sabemos). La diferencia entre ambas —esos 9 puntos porcentuales— es
     **ruido de muestreo**.
 
     ### Cuánto ruido
@@ -208,27 +193,25 @@ with home_tab:
 
     > ruido ≈ 1 / √60 ≈ ±0.13
 
-    Esto significa que cada correlación que calculamos tiene un **error típico de ±0.13** alrededor
-    del valor verdadero.
+    Esto significa que cada correlación que calculamos tiene un **error típico de ±0.13** alrededor del valor verdadero.
 
     ### El verdadero problema: dos activos sin relación
 
-    Imagina dos activos cuya correlación verdadera es **0** (no tienen ninguna relación real).
+    Pensemos en dos activos cuya correlación verdadera es **0** (no tienen ninguna relación real).
     Con 60 meses, nuestro estimado va a oscilar entre **-0.13 y +0.13** solo por puro azar.
 
     Ahora, el optimizador de Markowitz mira una correlación de -0.13 y piensa:
     *"¡Estos dos activos van en direcciones opuestas! Es diversificación gratis, voy a cargar peso acá."*
 
-    Pero esa correlación de -0.13 **no significa nada**, ya que la relación real es cero. 
-    El optimizador acaba de apostar el portafolio a una "oportunidad" que solo existe en los datos
-    pasados, no en la realidad.
+    Pero esa correlación de -0.13 **no significa nada**, ya que la relación real es cero.
+    El optimizador acaba de apostar el portafolio a una "oportunidad" que solo existe en los datos pasados, no en la realidad.
 
     ### Por qué empeora con 2,000 activos
 
-    Con 2,000 activos tenemos **2 millones de pares**. Si cada uno tiene un ruido típico de ±0.13,
-    muchos de esos 2 millones van a aterrizar por azar en valores que **parecen relaciones reales
-    pero no lo son**. El optimizador, que busca correlaciones extremas para construir el portafolio,
-    va a encontrar miles de "oportunidades" falsas. Por eso falla.
+    Con 2,000 activos tenemos **2 millones de pares**. Si cada uno tiene un ruido típico de ±0.13, muchos
+    de esos 2 millones van a aterrizar por azar en valores que **parecen relaciones reales pero no lo son**.
+    El optimizador, que busca correlaciones extremas para construir el portafolio, va a encontrar miles
+    de "oportunidades" falsas, y esto nos generaba fallos al intentar aplicar el modelo de Markowitz sin alteraciones.
 
     ### Por qué con más datos sería menos malo
 
@@ -236,58 +219,50 @@ with home_tab:
 
     > ruido ≈ 1 / √600 ≈ ±0.04
 
-    El error se reduce, las correlaciones espurias casi desaparecen. Pero esos datos no existen
-    para la mayoría de activos.
-    """)
+    El error se reduce, las correlaciones espurias casi desaparecen. Pero esos datos no existen para la mayoría
+    de activos. Otra posibilidad sería medir los datos semanales para aumentar el número de observaciones,
+    pero observamos empíricamente que esto resulta en una performance peor que utilizando datos mensuales
+    ya que la variación semana a semana es muy baja.
 
-    st.markdown("""
-    ### La solución tiene dos partes
+    ### La solución a este problema
 
     Para que Markowitz funcione necesitamos atacar el problema en **dos frentes complementarios**:
 
-    1. **Reducir el universo a un número manejable de activos** mediante clustering (sección 5).
-        Esto pasa de 2 millones de pares ruidosos a solo ~1,275 pares.
-    2. **Limpiar lo que queda** con la reducción de Ledoit-Wolf antes de optimizar (sección 7).
-        Esto suaviza los valores extremos que aún sobreviven.
-
-    El clustering hace el trabajo pesado. Ledoit-Wolf es el pulido final.
+    1. **Reducir el universo a un número manejable de activos** mediante clustering (sección 3). Esto pasa de 2 millones de pares ruidosos a solo ~1,275 pares.
+    2. **Limpiar lo que queda** con la reducción de Ledoit-Wolf antes de optimizar (sección 6). Esto suaviza los valores extremos que aún sobreviven.
     """)
 
-    # ── 5. Clustering ──
-    st.markdown("## 5. La Idea del Clustering")
+    # ── 3. Clustering de los datos ──
+    st.markdown("## 3. Clustering de los datos")
     st.markdown("""
-    **Reducir 2,000 activos a N grupos con comportamiento similar.**
-    Los activos que se mueven juntos (alta correlación) son sustitutos entre sí.
-    Tener *cualquiera* de ellos te da prácticamente la misma exposición que tener cualquier otro del grupo.
+    En este paso buscamos reducir 2,000 activos a N grupos con comportamiento similar, para seleccionar luego
+    los N activos candidatos. Los activos que se mueven juntos (alta correlación) actúan casi como sustitutos
+    entre sí. Tener cualquiera de ellos te da prácticamente la misma exposición que tener cualquier otro del grupo.
 
     Aplicamos **clustering jerárquico (Ward)** sobre una matriz de distancias derivada de las correlaciones:
 
     > distancia = 1 − correlación
 
-    Dos activos con correlación = 1 están a distancia 0 (mismo cluster).
-    Activos independientes están a distancia 1.
+    Dos activos con correlación = 1 están a distancia 0 (mismo cluster). Activos independientes están a distancia 1.
     Activos con correlación negativa están a distancia 2 (clusters muy distintos).
 
     Los dendrogramas de abajo muestran cómo se forma el árbol de agrupamiento.
-    La **línea de corte horizontal** determina N: corte alto → pocos clusters grandes;
-    corte bajo → muchos clusters finos.
+    La **línea de corte horizontal** determina N: corte alto, pocos clusters grandes; corte bajo, muchos clusters finos.
     """)
-
     st.markdown("""
     <div class='explainer-box'>
-    <strong>Espera — ¿no acabamos de decir que la matriz de 2,000 activos está llena de ruido?
-    ¿Por qué la usamos para clustering?</strong>
+    <strong>Si la matriz de 2,000 activos tiene mucho ruido, ¿por qué la usamos para clustering?</strong>
     <br><br>
     Porque <strong>el clustering tolera el ruido</strong>. Solo necesita ver la estructura gruesa:
     "estos activos tecnológicos se parecen entre sí, este grupo de utilities se parece entre sí,
-    los dos grupos son distintos". Aunque cada correlación individual tenga error de ±0.13,
-    la <em>estructura general</em> de qué se agrupa con qué emerge correctamente. Es como leer
-    un mapa borroso: no se distingue cada casa, pero sí se ve dónde están los barrios.
+    los dos grupos son distintos". Aunque cada correlación individual tenga error, la <em>estructura general</em>
+    de qué se agrupa con qué emerge correctamente. Es como leer un mapa borroso: no se distingue cada casa,
+    pero sí se ve dónde están los barrios.
     <br><br>
     En cambio, Markowitz <strong>no tolera el ruido</strong>: busca activamente los valores extremos
-    (correlaciones cercanas a cero le parecen "diversificación gratis") y apuesta el portafolio
-    a esas oportunidades que muchas veces son ficticias. Por eso podemos usar la matriz ruidosa
-    para clustering pero <em>no</em> para optimización directa por Markowitz.
+    (correlaciones cercanas a cero le parecen "diversificación gratis") y apuesta el portafolio a esas
+    oportunidades que muchas veces son ficticias. Por eso podemos usar la matriz ruidosa para clustering
+    pero <em>no</em> para optimización directa por Markowitz.
     </div>
     """, unsafe_allow_html=True)
     cols = st.columns(3)
@@ -296,134 +271,175 @@ with home_tab:
             col.image(str(STORY_DIR / f"dendrogram_n{n}.png"),
                       caption=f"Corte en N = {n}", use_container_width=True)
 
-    st.markdown("### ¿Por qué correlación y no covarianza directa?")
+    st.markdown("### ¿Por qué correlación y no covarianza?")
     st.markdown("""
     Esta es una pregunta importante porque **Markowitz sí usa la matriz de covarianza** en su fórmula original.
-    No la estamos descartando — la usamos más adelante, en el paso 7. Pero el **clustering del paso 5
-    usa correlación**, no covarianza. Son dos pasos distintos del pipeline:
+    No la estamos descartando, sino que la usamos más adelante, en el paso 6.
 
-    | Paso | Qué necesita | Por qué |
-    |---|---|---|
-    | **Paso 5: agrupar activos similares (clustering)** | **Correlación** | Queremos una medida pura de *qué tan parecidos se comportan dos activos*, sin que la volatilidad la distorsione |
-    | **Paso 7: optimizar pesos (Markowitz)** | **Covarianza** (con Ledoit-Wolf) | El problema real de portafolio sí necesita las magnitudes — saber cuánto riesgo aporta cada activo, no solo el "patrón" |
-
-    **¿Y por qué la covarianza confundiría al clustering?** Porque mezcla dos cosas:
+    La covarianza no es ideal para realizar el clustering de los datos porque mezcla dos piezas de información sobre los activos:
 
     - *Qué tanto se mueven juntos* (lo que queremos para el clustering)
     - *Qué tan volátiles son* (irrelevante para agrupar)
 
     Ejemplo concreto: Coca-Cola (KO) y Pepsi (PEP) tienen correlación de ~0.7 y son poco volátiles.
     Tesla (TSLA) y Rivian (RIVN) también tienen correlación de ~0.7, pero son muchísimo más volátiles.
-    Misma correlación, pero la covarianza TSLA-RIVN es varias veces más grande que la de KO-PEP,
-    solo porque sus números son más grandes.
+    Misma correlación, pero la covarianza TSLA-RIVN es varias veces más grande que la de KO-PEP, solo porque
+    sus números son más grandes.
 
-    Si usáramos covarianza directamente, el clustering agruparía por "qué tan movido es el activo"
-    en lugar de "con quién se mueve". Coca-Cola podría terminar en un cluster distinto a Pepsi
-    simplemente porque sus retornos son chiquitos, aunque su comportamiento sea idéntico.
+    Si usáramos covarianza directamente, el clustering agruparía por "qué tan volátil es el activo" en lugar
+    de únicamente "con quién se mueve". Coca-Cola podría terminar en un cluster distinto a Pepsi simplemente
+    porque sus retornos son chiquitos, aunque su comportamiento sea idéntico.
 
-    La correlación divide la covarianza por las volatilidades y elimina ese efecto.
-    Queda un número entre -1 y +1 que mide solo el patrón. Perfecto para clustering.
+    La correlación divide la covarianza por las volatilidades y elimina ese efecto. Queda un número entre -1 y +1
+    que mide solo el patrón. Perfecto para clustering.
     """)
-
     if (STORY_DIR / "correlation_full.png").exists():
-        st.markdown("**Matriz de correlación de una muestra de 200 activos** — el mar de rojo es lo que necesitamos comprimir:")
+        st.markdown("**Matriz de correlación de una muestra de 200 activos:**")
         st.image(str(STORY_DIR / "correlation_full.png"), use_container_width=True)
 
-    # ── 6. Representantes ──
-    st.markdown("## 6. Eligiendo un Representante de Cada Cluster")
+    # ── 4. Eligiendo un Representante ──
+    st.markdown("## 4. Eligiendo un Representante de Cada Cluster")
     st.markdown("""
     Una vez que tenemos N clusters de activos similares, necesitamos un representante de cada uno.
-
-    | Regla | Lógica | Trade-off |
-    |---|---|---|
-    | **Mayor Sharpe individual** ✓ | Mejor retorno ajustado por riesgo del grupo | Puede sobreajustarse a ganadores del pasado |
-    | Mayor retorno | El más agresivo | Ignora el riesgo |
-    | Más cercano al centroide | El más "promedio" | No premia desempeño |
-    | Menor volatilidad | El más defensivo | Pierde activos de crecimiento |
-
-    Elegimos **mayor Sharpe individual**: el activo cuyo Sharpe histórico es el más alto dentro
-    de su cluster. Es intuitivo pero introduce un *sesgo de supervivencia* — los ganadores
-    del pasado no necesariamente seguirán siéndolo. Esta es la debilidad fundamental de este modelo, por lo que incorporamos
-    la selección manual de acciones para complementar utilizando una estrategia dual. 
     """)
-
-    # ── 7. Optimización ──
-    st.markdown("## 7. Optimizando los Pesos de los N Representantes")
     st.markdown("""
-    Una vez que ya tenemos los 50 representantes, **descartamos por completo la matriz "sucia"
-    de 2,000 activos y construimos una nueva matriz de covarianza desde cero, solo con los 50 elegidos.**
-
-    El pipeline completo se ve así:
-    """)
-
-    st.markdown("""
-    <div class='workflow-step'><strong>Paso 1:</strong> Universo de 2,000 activos × 60 meses</div>
-    <div class='workflow-step'><strong>Paso 2:</strong> Calcular matriz de correlaciones (ruidosa, pero <em>el clustering tolera el ruido</em>)</div>
-    <div class='workflow-step'><strong>Paso 3:</strong> Clusterizar en 50 grupos</div>
-    <div class='workflow-step'><strong>Paso 4:</strong> Elegir un representante por cluster → 50 activos</div>
-    <div class='workflow-step'><strong>Paso 5:</strong> 🔁 <em>RECALCULAR</em> la matriz de covarianza desde cero, <strong>solo con esos 50 activos</strong></div>
-    <div class='workflow-step'><strong>Paso 6:</strong> Aplicar Ledoit-Wolf a esa matriz nueva de 50×50</div>
-    <div class='workflow-step'><strong>Paso 7:</strong> Markowitz max-Sharpe sobre los 50 activos</div>
+    <table style="width:100%; border-collapse:collapse;">
+      <thead>
+        <tr style="background:#d5e8f0;">
+          <th style="padding:8px; border:1px solid #ccc; text-align:left;">Regla</th>
+          <th style="padding:8px; border:1px solid #ccc; text-align:left;">Lógica</th>
+          <th style="padding:8px; border:1px solid #ccc; text-align:left;">Trade-off</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="background:#d4edda;">
+          <td style="padding:8px; border:1px solid #ccc;"><strong>✓ Mayor Sharpe individual</strong> (elegida)</td>
+          <td style="padding:8px; border:1px solid #ccc;">Mejor retorno ajustado por riesgo del grupo</td>
+          <td style="padding:8px; border:1px solid #ccc;">Puede sobreajustarse a ganadores del pasado</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; border:1px solid #ccc;">Mayor retorno</td>
+          <td style="padding:8px; border:1px solid #ccc;">El más agresivo</td>
+          <td style="padding:8px; border:1px solid #ccc;">Ignora el riesgo</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; border:1px solid #ccc;">Más cercano al centroide</td>
+          <td style="padding:8px; border:1px solid #ccc;">El más "promedio"</td>
+          <td style="padding:8px; border:1px solid #ccc;">No premia desempeño</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; border:1px solid #ccc;">Menor volatilidad</td>
+          <td style="padding:8px; border:1px solid #ccc;">El más defensivo</td>
+          <td style="padding:8px; border:1px solid #ccc;">Pierde activos de crecimiento</td>
+        </tr>
+      </tbody>
+    </table>
     """, unsafe_allow_html=True)
-
     st.markdown("""
-    ### ¿Cuánto mejoró el problema con esto?
+    Elegimos **mayor Sharpe individual**: el activo cuyo Sharpe histórico es el más alto dentro de su cluster.
+    Esta es la debilidad fundamental de este modelo, ya que los ganadores del pasado no necesariamente seguirán
+    siéndolo. Hay una cuota de percibir el futuro en las inversiones que no puede ser reemplazada simplemente
+    por los datos. Fundamentalmente por este motivo incorporamos la **selección manual de acciones**, lo que
+    permite complementar una tésis de inversión con activos de riesgo complementario de todo el mundo.
+    """)
 
-    | | Sin clustering | Con clustering |
-    |---|---|---|
-    | Pares a estimar | 2,000,000 | **1,275** |
-    | Observaciones | 60 meses | 60 meses |
-    | Ruido por par | ±0.13 | ±0.13 (igual) |
-
-    Nota algo interesante: **el ruido por par no cambia** (sigue siendo ±0.13, depende solo del
-    número de observaciones). Lo que cambia drásticamente es la **cantidad de pares**. Con 1,275 pares
-    ruidosos en vez de 2 millones, el optimizador tiene muchísimas menos trampas en las que caer.
+    # ── 5, 6 y 7. Optimización ──
+    st.markdown("## 5, 6 y 7. Optimizando los Pesos de los N Representantes")
+    st.markdown("""
+    Una vez que ya tenemos los N representantes elegidos, **descartamos por completo la matriz de 2,000 activos
+    y construimos una nueva matriz de covarianza desde cero, solo con los 50 elegidos**.
 
     ### Ledoit-Wolf en este paso
 
     Aplicamos Ledoit-Wolf sobre la matriz nueva de 50×50 (no sobre la original de 2,000×2,000).
-    Aquí no es el "rescatador" del pipeline — el clustering ya hizo el trabajo pesado.
-    Ledoit-Wolf es un **pulido final** que:
+    Ledoit-Wolf es un pulido final que:
 
     - Empuja los valores extremos que aún sobreviven hacia el promedio
     - Estabiliza los pesos entre rebalanceos (menos turnover si se ejecutara en la vida real)
-    - Es gratis y siempre ayuda un poco
 
+    Decidimos aplicar Ledoit-Wolf porque en nuestros experimentos notamos que de no estabilizar la matriz
+    de covarianzas usualmente terminábamos con portfolios imposibles con ratio de Sharpe artificialmente inflado.
     """)
-
     st.markdown("""
     <div class='explainer-box'>
-    <strong>Ledoit-Wolf en lenguaje sencillo:</strong> en vez de creerle ciegamente a los valores
-    extremos de la matriz, los "tiramos" un poco hacia el promedio. Si una correlación dice 0.95,
-    sospechamos que es ruido y la bajamos un poco. Si dice -0.05, sospechamos lo mismo y la subimos
-    hacia el promedio del mercado.
-    <br><br>
-    El método de Ledoit-Wolf calcula <em>matemáticamente</em> cuánto hay que encoger,
+    <strong>Ledoit-Wolf en lenguaje sencillo:</strong> en vez de creerle ciegamente a los valores extremos
+    de la matriz, los "tiramos" un poco hacia el promedio. Si una correlación dice 0.95, sospechamos que
+    es ruido y la bajamos un poco. Si dice -0.05, sospechamos lo mismo y la subimos hacia el promedio
+    del mercado. El método de Ledoit-Wolf calcula <em>matemáticamente</em> cuánto hay que encoger,
     sin necesidad de elegir parámetros a mano.
     </div>
     """, unsafe_allow_html=True)
 
+    # ── El perfil del usuario ──
+    st.markdown("## El perfil del usuario")
     st.markdown("""
-    Finalmente, resolvemos los pesos que **maximizan el Sharpe** sujetos a:
-
-    - `peso_mínimo` y `peso_máximo` por activo
-    - Activos `fijos` que siempre se incluyen
+    Es crucial que el usuario se sienta cómodo en la elección de los activos. Un portafolio de elevado retorno
+    pero que no permite al inversor dormir por las noches no serviría jamás. Por este motivo incluímos varias
+    palancas de funcionamiento que permiten modificar qué tipos de activos terminarán en el resultado final.
     """)
+    st.markdown("""
+    <table style="width:100%; border-collapse:collapse;">
+      <thead>
+        <tr style="background:#d5e8f0;">
+          <th style="padding:8px; border:1px solid #ccc; text-align:left;">Palanca</th>
+          <th style="padding:8px; border:1px solid #ccc; text-align:left;">Qué controla</th>
+          <th style="padding:8px; border:1px solid #ccc; text-align:left;">Para qué sirve</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:8px; border:1px solid #ccc;"><strong># de clusters (N)</strong></td>
+          <td style="padding:8px; border:1px solid #ccc;">Cantidad de activos en el portafolio final</td>
+          <td style="padding:8px; border:1px solid #ccc;">Más clusters = portafolio más diversificado y granular; menos clusters = portafolio concentrado</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; border:1px solid #ccc;"><strong>Peso mínimo / máximo</strong></td>
+          <td style="padding:8px; border:1px solid #ccc;">Piso y techo de capital por activo</td>
+          <td style="padding:8px; border:1px solid #ccc;">Evita que el optimizador concentre todo en una sola acción o descarte activos arbitrariamente</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; border:1px solid #ccc;"><strong>Sharpe individual mínimo</strong></td>
+          <td style="padding:8px; border:1px solid #ccc;">Filtra activos con bajo retorno ajustado por riesgo</td>
+          <td style="padding:8px; border:1px solid #ccc;">Excluye candidatos débiles antes del clustering. Más alto = universo más exigente</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; border:1px solid #ccc;"><strong>Tolerancia al riesgo</strong></td>
+          <td style="padding:8px; border:1px solid #ccc;">Volatilidad máxima admisible por activo</td>
+          <td style="padding:8px; border:1px solid #ccc;">Los botones Baja/Media/Alta corresponden a los percentiles 25/50/75 de volatilidad del universo</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; border:1px solid #ccc;"><strong>Activos fijos</strong></td>
+          <td style="padding:8px; border:1px solid #ccc;">Acciones que se incluyen sí o sí</td>
+          <td style="padding:8px; border:1px solid #ccc;">Reemplazan al representante de su cluster — útil para inyectar una tésis de inversión sin perder diversificación</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; border:1px solid #ccc;"><strong>Activos excluidos</strong></td>
+          <td style="padding:8px; border:1px solid #ccc;">Acciones que nunca entran al universo</td>
+          <td style="padding:8px; border:1px solid #ccc;">Filtra empresas específicas por razones éticas, de exposición o personales</td>
+        </tr>
+        <tr>
+          <td style="padding:8px; border:1px solid #ccc;"><strong>Regiones</strong></td>
+          <td style="padding:8px; border:1px solid #ccc;">Países o continentes permitidos</td>
+          <td style="padding:8px; border:1px solid #ccc;">Restringe el universo geográficamente. Por ejemplo: solo Asia-Pacífico, o excluir mercados emergentes</td>
+        </tr>
+      </tbody>
+    </table>
+    """, unsafe_allow_html=True)
 
-    # ── 8. La prueba honesta ──
-    st.markdown("## 8. La Prueba Honesta: Backtest Walk-Forward")
+    # ── Backtest ──
+    st.markdown("## Testeando el funcionamiento: Backtest Walk-Forward")
 
     st.markdown("""
     <div class='explainer-box'>
     <strong>Dentro de muestra vs. fuera de muestra.</strong>
     <br><br>
-    El <strong>Sharpe dentro de muestra (in-sample)</strong> se calcula sobre los mismos datos
-    que el optimizador usó para elegir los pesos. El optimizador mira la historia, encuentra la combinación que mejor se ajusta a esa historia,
-    y luego le preguntas qué Sharpe tiene. Por supuesto se ve excelente, fue diseñado precisamente
-    para esa historia exacta. Casi nunca refleja el desempeño real futuro. 
+    El <strong>Sharpe dentro de muestra (in-sample)</strong> se calcula sobre los mismos datos que el optimizador
+    usó para elegir los pesos. El optimizador mira la historia, encuentra la combinación que mejor se ajusta a esa
+    historia, y luego le preguntas qué Sharpe tiene. Por supuesto se ve excelente, ya que fue diseñado maximizando
+    el Sharpe con esos datos históricos. Casi nunca refleja el desempeño real futuro.
     <br><br>
-    El <strong>Sharpe realizado (fuera de muestra, OOS)</strong> se calcula sobre datos que el
-    optimizador <em>nunca vio</em> cuando eligió los pesos. Es aproximadamente igual a utilizar un set de entrenamiento
+    El <strong>Sharpe realizado (fuera de muestra, OOS)</strong> se calcula sobre datos que el optimizador
+    <em>nunca vio</em> cuando eligió los pesos. Es aproximadamente igual a utilizar un set de entrenamiento
     y uno de validación, y es el único número que sirve para juzgar si la estrategia realmente funciona.
     </div>
     """, unsafe_allow_html=True)
@@ -432,16 +448,15 @@ with home_tab:
     <div class='explainer-box'>
     <strong>¿Cómo conseguimos datos "que el optimizador nunca vio"?</strong>
     <br><br>
-    Para esto, viajamos al pasado y nos detenemos en cada trimestre.
-    En cada parada le decimos al algoritmo: "<em>solo podés ver los datos hasta este punto.
-    Construí un portafolio.</em>"
+    Para esto, viajamos al pasado y nos detenemos en cada trimestre. En cada parada le decimos al algoritmo:
+    "<em>solo podés ver los datos hasta este punto. Construí un portafolio.</em>"
     <br><br>
-    Luego dejamos correr el reloj 3 meses hacia adelante <em>sin tocar nada</em>, y observamos
-    cómo le fue al portafolio. Ese es un periodo "fuera de muestra": el optimizador no vio esos
-    3 meses cuando eligió los pesos.
+    Luego dejamos correr el reloj 3 meses hacia adelante <em>sin tocar nada</em>, y observamos cómo le fue
+    al portafolio. Ese es un periodo "fuera de muestra": el optimizador no vio esos 3 meses cuando eligió los pesos.
     <br><br>
-    Repetimos esto trimestre tras trimestre. Cosemos todo en una sola serie de retornos.
-    El Sharpe calculado sobre esa serie cosida es el <strong>Sharpe realizado</strong>.
+    Repetimos esto trimestre tras trimestre. Cosemos todo en una sola serie de retornos. El Sharpe calculado
+    sobre esa serie cosida es el <strong>Sharpe realizado</strong>. En la práctica, esto resulta equivalente
+    a actualizar la composición del portafolio cada 3 meses.
     </div>
     """, unsafe_allow_html=True)
 
@@ -454,8 +469,8 @@ with home_tab:
     <div class='workflow-step'><strong>Trimestre 3:</strong> Entrena con datos de Ene 2022 → Dic 2024 →
     elige pesos W₃ → aplica W₃ a Ene-Mar 2025 → registra 3 retornos mensuales reales</div>
     <div class='workflow-step'>... (se repite 8 veces, en total 24 meses fuera de muestra)</div>
-    <div class='workflow-step'><strong>Final:</strong> calculamos Sharpe, retorno y drawdown sobre
-    los 24 retornos mensuales recolectados. Eso es lo que reportamos.</div>
+    <div class='workflow-step'><strong>Final:</strong> calculamos Sharpe, retorno y drawdown sobre los 24
+    retornos mensuales recolectados. Eso es lo que reportamos.</div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
@@ -467,8 +482,8 @@ with home_tab:
     if (STORY_DIR / "bias_variance.png").exists():
         st.image(str(STORY_DIR / "bias_variance.png"), use_container_width=True)
 
-    # ── 9. Resultados ──
-    st.markdown("## 9. Los Resultados")
+    # ── Resultados ──
+    st.markdown("## Los Resultados")
     if (STORY_DIR / "drawdown.png").exists():
         st.image(str(STORY_DIR / "drawdown.png"), use_container_width=True)
         st.caption("**Drawdown (gráfico de inmersión):** la peor pérdida desde un pico anterior en cada momento. Un punto de −20% significa que en ese momento el portafolio estaba 20% por debajo de su máximo previo.")
@@ -482,33 +497,30 @@ with home_tab:
         st.image(str(STORY_DIR / "n_sensitivity.png"), use_container_width=True)
         st.caption("**Sensibilidad a N:** ¿cómo cambia el Sharpe realizado al variar el número de clusters? Útil para elegir N.")
 
-    # ── 10. Veredicto ──
-    st.markdown("## 10. El Veredicto")
-    try:
-        beat = s['total_return'] > b['total_return']
-        st.markdown(f"""
-        - **¿Le ganó al mercado por retorno total?** {'Sí' if beat else 'No'} — {s['total_return']:.0%} vs {b['total_return']:.0%} del SPY.
-        - **¿Por Sharpe (retorno ajustado por riesgo)?** Estrategia {s['sharpe']:.2f} vs SPY {b['sharpe']:.2f}.
-        - **Máximo drawdown:** estrategia {s['max_drawdown']:.0%} vs SPY {b['max_drawdown']:.0%}.
+    # ── El Veredicto ──
+    st.markdown("## El Veredicto")
+    st.markdown("""
+    - **¿Le ganó al mercado por retorno total?** Sí — 57% vs 40% del SPY.
+    - **¿Por Sharpe (retorno ajustado por riesgo)?** Estrategia 1.74 vs SPY 1.18.
+    - **Máximo drawdown:** estrategia −8% vs SPY −8%.
 
-        **Advertencias importantes que podrían cambiar la conclusión:**
-        - **Sin costos de transacción** — rebalancear 50 acciones globales cada trimestre quitaría 0.5%–1% anual
-        - **Ventana corta** — solo ~2 años de prueba fuera de muestra. Un mercado bajista podría cambiar todo
-        - **Sesgo de supervivencia** en el universo — usamos los componentes *actuales* de los índices (empresas que sobrevivieron)
-        - **Sin fricción fiscal**
-        - **El periodo OOS fue inusualmente favorable para SPY** (Sharpe 1.18 vs el histórico ~0.5). Es decir, la estrategia le ganó en un periodo donde SPY estuvo *especialmente fuerte*
+    **Advertencias importantes que podrían cambiar la conclusión:**
 
-        La estrategia es **plausiblemente viable** — un Sharpe realizado de {s['sharpe']:.2f} está cómodamente
-        por encima de 1 (el umbral aproximado para que una estrategia activa "valga la pena"), y la
-        diversificación geográfica protege contra riesgos regionales. Pero la brecha entre dentro de
-        muestra (4-6) y fuera de muestra ({s['sharpe']:.2f}) es el mensaje honesto:
-        **la mayor parte de lo que el optimizador "descubre" en datos históricos es ruido**,
-        y solo una fracción sobrevive al contacto con el futuro.
-        """)
-    except Exception:
-        pass
+    - **Sin costos de transacción.** Rebalancear 50 acciones globales cada trimestre quitaría 0.5%–1% anual. Esta es tal vez una de las mayores debilidades.
+    - **Ventana corta**, con solo ~2 años de prueba fuera de muestra.
+    - **Sesgo de supervivencia** en el universo. Usamos los componentes actuales de los índices (empresas que sobrevivieron).
+    - **Sin efecto de realización de ganancias** en las ventas intermedias.
+    - **El periodo OOS fue inusualmente favorable para SPY** (Sharpe 1.18 vs el histórico ~0.5). Es decir, la estrategia le ganó en un periodo donde SPY estuvo especialmente fuerte.
+    - **Fuerte efecto de volatilidad de acciones individuales.**
+
+    La estrategia es **plausiblemente viable**. Un Sharpe realizado de 1.74 está cómodamente por encima de 1,
+    y la diversificación geográfica protege contra riesgos regionales. Pero la brecha entre dentro de muestra (4-6)
+    y fuera de muestra (1.74) muestra que **la mayor parte de lo que el optimizador "descubre" en datos históricos
+    es ruido**, y solo una fracción de los beneficios esperados se materializa al analizarlo en un escenario real.
+    """)
 
     st.success("**Pruébalo tú mismo** en la pestaña **🛠 La Herramienta** — mueve las palancas y observa cómo cambia el portafolio.")
+
 
 
 # =================================================================
