@@ -48,6 +48,12 @@ div[data-testid="stTabs"] button[role="tab"] {
     font-weight: 600;
 }
 
+/* Ocultar la sidebar cuando la pestaña Teoría (la 2ª) está activa */
+body:has(div[data-baseweb="tab-list"] > button[role="tab"]:nth-child(2)[aria-selected="true"]) [data-testid="stSidebar"],
+body:has(div[data-baseweb="tab-list"] > button[role="tab"]:nth-child(2)[aria-selected="true"]) [data-testid="collapsedControl"] {
+    display: none !important;
+}
+
 .explainer-box {
     background: #eef4fb !important;
     color: #1a2940 !important;
@@ -83,7 +89,7 @@ def cached_returns():
 # ─────────────────────────────────────────────────────────────────
 # Pestañas
 # ─────────────────────────────────────────────────────────────────
-home_tab, tool_tab = st.tabs(["📖 Teoría", "🛠 Herramienta"])
+tool_tab, home_tab = st.tabs(["🛠 Portfolio", "📖 Teoría"])
 
 
 # =================================================================
@@ -521,7 +527,7 @@ with home_tab:
     es ruido**, y solo una fracción de los beneficios esperados se materializa al analizarlo en un escenario real.
     """)
 
-    st.success("**Pruébalo tú mismo** en la pestaña **🛠 Herramienta** — mueve las palancas y observa cómo cambia el portafolio.")
+    st.success("**Pruébalo tú mismo** en la pestaña **🛠 Portfolio** — mueve las palancas y observa cómo cambia el portafolio.")
 
 
 
@@ -529,8 +535,6 @@ with home_tab:
 # PESTAÑA HERRAMIENTA
 # =================================================================
 with tool_tab:
-    st.title("Construye un Portafolio")
-    st.caption("Configura las palancas, presiona Optimizar. Pasa el cursor sobre cualquier métrica para ver una definición.")
 
     RETURNS = cached_returns()
     investable = drop_benchmarks(RETURNS)
@@ -636,7 +640,10 @@ with tool_tab:
         st.session_state.bt = None
         st.session_state.bh = None
 
-    if go:
+    # Auto-cálculo en la primera apertura de la pestaña (con defaults)
+    first_run = st.session_state.result is None
+
+    if go or first_run:
         with st.spinner("Optimizando portafolio... (puede tomar 20-40 segundos con backtest)"):
             try:
                 regions = regions_sel if len(regions_sel) < len(all_regions) else None
@@ -767,14 +774,27 @@ with tool_tab:
         st.markdown("### Detalle por activo")
         st.caption("Una fila por activo seleccionado por el clustering. "
                    "Incluye los que el optimizador descartó (peso 0) para que veas qué candidatos había. "
-                   "Haz click en los encabezados para ordenar.")
+                   "Haz click en el ticker para abrir Yahoo Finance, o en cualquier encabezado para ordenar.")
         view = metrics_all.copy()
+        view.insert(0, "Ticker", [f"https://finance.yahoo.com/quote/{t}" for t in view.index])
         view["weight"] = (view["weight"] * 100).round(2)
         view["annual_return"] = (view["annual_return"] * 100).round(2)
         view["volatility"] = (view["volatility"] * 100).round(2)
         view["sharpe"] = view["sharpe"].round(2)
-        view.columns = ["Peso %", "Retorno anual %", "Volatilidad %", "Sharpe", "Región", "Sector"]
-        st.dataframe(view, use_container_width=True)
+        view.columns = ["Ticker", "Peso %", "Retorno anual %", "Volatilidad %", "Sharpe", "Región", "Sector"]
+        st.dataframe(
+            view, use_container_width=True, hide_index=True,
+            column_config={
+                "Ticker": st.column_config.LinkColumn(
+                    "Ticker",
+                    display_text=r"^https://finance\.yahoo\.com/quote/(.*)$",
+                    help="Click para abrir el activo en Yahoo Finance.",
+                ),
+                "Peso %": st.column_config.NumberColumn(format="%.2f"),
+                "Retorno anual %": st.column_config.NumberColumn(format="%.2f"),
+                "Volatilidad %": st.column_config.NumberColumn(format="%.2f"),
+            },
+        )
 
         # Curva de capital
         st.markdown("### Curva de capital")
