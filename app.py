@@ -514,16 +514,15 @@ with home_tab:
 
     **Advertencias importantes que podrían cambiar la conclusión:**
 
-    - **Sin costos de transacción.** Rebalancear 50 acciones globales cada trimestre quitaría 0.5%–1% anual. Esta es tal vez una de las mayores debilidades.
+    - **Sin costos de transacción.** Rebalancear 50 acciones globales cada trimestre quitaría un porcentaje alto de comisiones. Esta es tal vez una de las mayores debilidades.
     - **Ventana corta**, con solo ~2 años de prueba fuera de muestra.
-    - **Sesgo de supervivencia** en el universo. Usamos los componentes actuales de los índices (empresas que sobrevivieron).
-    - **Sin efecto de realización de ganancias** en las ventas intermedias.
-    - **El periodo OOS fue inusualmente favorable para SPY** (Sharpe 1.18 vs el histórico ~0.5). Es decir, la estrategia le ganó en un periodo donde SPY estuvo especialmente fuerte.
+    - **La estrategia es muy sensible al perfil de riesgo del inversor. Bajar la tolerancia al riesgo resulta en portafolios con menor retorno
+    - **La estrategia tiene en cuenta solo la historia y no puede evaluar posibilidades futuras
     - **Fuerte efecto de volatilidad de acciones individuales.**
 
-    La estrategia es **plausiblemente viable**. Un Sharpe realizado de 1.74 está cómodamente por encima de 1,
-    y la diversificación geográfica protege contra riesgos regionales. Pero la brecha entre dentro de muestra (4-6)
-    y fuera de muestra (1.74) muestra que **la mayor parte de lo que el optimizador "descubre" en datos históricos
+    La estrategia es **plausiblemente viable**. Un Sharpe realizado de 2.28 está cómodamente por encima de 1,
+    y la diversificación geográfica protege contra riesgos regionales. Pero la brecha entre dentro de muestra
+    y fuera de muestra muestra que **la mayor parte de lo que el optimizador "descubre" en datos históricos
     es ruido**, y solo una fracción de los beneficios esperados se materializa al analizarlo en un escenario real.
     """)
 
