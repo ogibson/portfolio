@@ -508,9 +508,9 @@ with home_tab:
     # ── El Veredicto ──
     st.markdown("## El Veredicto")
     st.markdown("""
-    - **¿Le ganó al mercado por retorno total?** Sí — 57% vs 40% del SPY.
-    - **¿Por Sharpe (retorno ajustado por riesgo)?** Estrategia 1.74 vs SPY 1.18.
-    - **Máximo drawdown:** estrategia −8% vs SPY −8%.
+    - **¿Le ganó al mercado por retorno total?** Sí 32.14 vs 19.17 SPY.
+    - **¿Por Sharpe (retorno ajustado por riesgo)?** Estrategia 2.28 vs SPY 1.17.
+    - **Máximo drawdown:** SI%.
 
     **Advertencias importantes que podrían cambiar la conclusión:**
 
