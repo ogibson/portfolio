@@ -510,14 +510,14 @@ with home_tab:
     st.markdown("""
     - **¿Le ganó al mercado por retorno total?** Sí 32.14 vs 19.17 SPY.
     - **¿Por Sharpe (retorno ajustado por riesgo)?** Estrategia 2.28 vs SPY 1.17.
-    - **Máximo drawdown:** SI%.
+    - **Máximo drawdown:** SI.
 
     **Advertencias importantes que podrían cambiar la conclusión:**
 
     - **Sin costos de transacción.** Rebalancear 50 acciones globales cada trimestre quitaría un porcentaje alto de comisiones. Esta es tal vez una de las mayores debilidades.
     - **Ventana corta**, con solo ~2 años de prueba fuera de muestra.
-    - **La estrategia es muy sensible al perfil de riesgo del inversor. Bajar la tolerancia al riesgo resulta en portafolios con menor retorno
-    - **La estrategia tiene en cuenta solo la historia y no puede evaluar posibilidades futuras
+    - **La estrategia es muy sensible al perfil de riesgo del inversor. Bajar la tolerancia al riesgo resulta en portafolios con menor retorno**
+    - **La estrategia tiene en cuenta solo la historia y no puede evaluar posibilidades futuras**
     - **Fuerte efecto de volatilidad de acciones individuales.**
 
     La estrategia es **plausiblemente viable**. Un Sharpe realizado de 2.28 está cómodamente por encima de 1,
